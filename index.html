@@ -145,6 +145,7 @@
         .panel-content {
             flex: 1;
             overflow-y: auto;
+            max-height: 100vh;
             padding: 24px 20px;
             opacity: 1;
             transition: opacity 0.2s;
@@ -465,6 +466,34 @@
             top: 50%;
             transform: translate(-50%, -50%);
         }
+
+      
+        
+        /* Или если нужно принудительно */
+        .right-panel .panel-content {
+            overflow-y: auto !important;
+            max-height: 100vh;
+            scrollbar-width: thin;
+        }
+        
+        /* Красивый скроллбар */
+        .right-panel .panel-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .right-panel .panel-content::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 10px;
+        }
+        
+        .right-panel .panel-content::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        
+        .right-panel .panel-content::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
     </style>
 </head>
 <body>
@@ -654,6 +683,99 @@ let state = {
     showHandles: false,
     lastCreatedCurveIdx: -1
 };
+
+// Пресеты для разных размеров иконок (канвас 512×512)
+const iconPresets = {
+    favicon: {   // 16×16px
+        targetSize: 16,
+        gridSize: 32,
+        blocksX: 16,
+        blocksY: 16,
+        minThickness: 32,
+        description: "Favicon (16×16)"
+    },
+    menu32: {    // 32×32px
+        targetSize: 32,
+        gridSize: 16,
+        blocksX: 32,
+        blocksY: 32,
+        minThickness: 16,
+        description: "Меню (32×32)"
+    },
+    standard64: { // 64×64px
+        targetSize: 64,
+        gridSize: 8,
+        blocksX: 64,
+        blocksY: 64,
+        minThickness: 8,
+        description: "Стандартная (64×64)"
+    },
+    high128: {   // 128×128px
+        targetSize: 128,
+        gridSize: 4,
+        blocksX: 128,
+        blocksY: 128,
+        minThickness: 4,
+        description: "Высокое разрешение (128×128)"
+    },
+    ultra256: {  // 256×256px
+        targetSize: 256,
+        gridSize: 2,
+        blocksX: 256,
+        blocksY: 256,
+        minThickness: 2,
+        description: "Ультра HD (256×256)"
+    },
+    full512: {   // 512×512px
+        targetSize: 512,
+        gridSize: 1,
+        blocksX: 512,
+        blocksY: 512,
+        minThickness: 1,
+        description: "Полное разрешение (512×512)"
+    }
+};
+
+// Функция переключения режима
+function setIconMode(mode) {
+    const preset = iconPresets[mode];
+    if (!preset) return;
+    
+    // Меняем сетку
+    state.gridSize = preset.gridSize;
+    if (gridSize) gridSize.value = preset.gridSize;
+    
+    // Ограничиваем толщину линии
+    if (thickness) {
+        thickness.min = preset.minThickness;
+        
+        // Если текущая толщина меньше минимальной - поднимаем
+        if (state.thickness < preset.minThickness) {
+            state.thickness = preset.minThickness;
+            thickness.value = preset.minThickness;
+            if (thickVal) thickVal.textContent = preset.minThickness;
+        }
+    }
+    
+    // Включаем привязку к сетке
+    state.snap = true;
+    if (snap) snap.checked = true;
+    if (gridBtn) gridBtn.classList.add('active');
+    
+    // Обновляем информацию
+    const modeInfo = document.getElementById('modeInfo');
+    if (modeInfo) {
+        modeInfo.innerHTML = `📐 Блоков: ${preset.blocksX}×${preset.blocksY} | ✏️ Мин. толщина: ${preset.minThickness}px<br>🎯 Целевой размер: ${preset.targetSize}×${preset.targetSize}px`;
+    }
+    
+    // Перерисовываем
+    draw();
+    
+    console.log(`🎯 Режим: ${preset.description}`);
+    console.log(`📐 Сетка: ${preset.gridSize}px`);
+    console.log(`🔢 Блоков: ${preset.blocksX}×${preset.blocksY}`);
+    console.log(`✏️ Мин. толщина: ${preset.minThickness}px`);
+}
 
 // Инициализация
 function init() {
@@ -2017,64 +2139,21 @@ function generateSVGString() {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}">\n${paths}</svg>`;
 }
 
-function generatePNGDataURL(size) {
+// Функция экспорта PNG с конкретным размером (используется в ZIP экспорте)
+function generatePNGDataURL(targetSize) {
     return new Promise((resolve) => {
-        // Определяем границы
-        let minX = Infinity, minY = Infinity;
-        let maxX = -Infinity, maxY = -Infinity;
-        
-        state.paths.forEach(path => {
-            const thickness = path.thickness || state.thickness;
-            const offset = thickness / 2;
-            
-            if (path.tool === 'circle') {
-                const center = path.points[0];
-                const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
-                minX = Math.min(minX, center.x - radius - offset);
-                minY = Math.min(minY, center.y - radius - offset);
-                maxX = Math.max(maxX, center.x + radius + offset);
-                maxY = Math.max(maxY, center.y + radius + offset);
-            } else {
-                path.points.forEach(p => {
-                    minX = Math.min(minX, p.x - offset);
-                    minY = Math.min(minY, p.y - offset);
-                    maxX = Math.max(maxX, p.x + offset);
-                    maxY = Math.max(maxY, p.y + offset);
-                });
-            }
-        });
-        
-        if (minX === Infinity) {
-            minX = minY = 0;
-            maxX = maxY = 100;
-        }
-        
-        const padding = 10;
-        minX -= padding;
-        minY -= padding;
-        maxX += padding;
-        maxY += padding;
-        
-        const contentWidth = maxX - minX;
-        const contentHeight = maxY - minY;
-        const scale = Math.min(size / contentWidth, size / contentHeight);
-        const finalWidth = Math.round(contentWidth * scale);
-        const finalHeight = Math.round(contentHeight * scale);
-        const offsetX = -minX;
-        const offsetY = -minY;
+        const scale = targetSize / 512;
         
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = size;
-        tempCanvas.height = size;
+        tempCanvas.width = targetSize;
+        tempCanvas.height = targetSize;
         const tempCtx = tempCanvas.getContext('2d');
         
-        const xOffset = (size - finalWidth) / 2;
-        const yOffset = (size - finalHeight) / 2;
+        // Отключаем сглаживание для чётких пикселей
+        tempCtx.imageSmoothingEnabled = false;
         
         tempCtx.save();
-        tempCtx.translate(xOffset, yOffset);
         tempCtx.scale(scale, scale);
-        tempCtx.translate(offsetX, offsetY);
         
         state.paths.forEach(path => {
             const thickness = path.thickness || state.thickness;
@@ -2084,6 +2163,7 @@ function generatePNGDataURL(size) {
             tempCtx.lineWidth = thickness;
             tempCtx.lineCap = 'round';
             tempCtx.lineJoin = 'round';
+            tempCtx.fillStyle = 'none';
             
             tempCtx.beginPath();
             drawPath(tempCtx, path);
@@ -2124,7 +2204,11 @@ function downloadBlob(blob, filename) {
 if (exportAllSizesBtn) exportAllSizesBtn.onclick = exportAllWebSizes;
 if (exportFaviconBtn) exportFaviconBtn.onclick = exportFaviconPack;
 if (exportSpriteBtn) exportSpriteBtn.onclick = exportSprite;
-
+// Обработчик переключения режима иконки
+const iconModeSelect = document.getElementById('iconMode');
+if (iconModeSelect) {
+    iconModeSelect.onchange = () => setIconMode(iconModeSelect.value);
+}
 
 </script>
 
