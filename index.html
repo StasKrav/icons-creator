@@ -831,6 +831,7 @@ function getMousePos(e) {
 function onMouseDown(e) {
     const pos = getMousePos(e);
     
+    // Двойной клик для выбора
     if (e.detail === 2 && state.tool === 'select') {
         const pathIdx = findPathAt(pos.x, pos.y);
         if (pathIdx !== -1) {
@@ -842,25 +843,16 @@ function onMouseDown(e) {
         }
     }
     
-    if (state.tool === 'curve' || state.tool === 'select') {
-        const handle = findHandle(pos.x, pos.y);
-        if (handle) {
-            state.dragType = 'handle';
-            state.dragData = {
-                ...handle,
-                startX: pos.x,
-                startY: pos.y
-            };
-            state.isDragging = true;
-            state.selectedPathIdx = handle.pathIdx;
-            state.showHandles = true;
-            updatePanelFromSelected();
-            draw();
-            return;
-        }
+    if (state.tool === 'curve') {
+        state.selectedPathIdx = -1;
+        state.currentPath = [{x: pos.x, y: pos.y}];
+        state.isDrawing = true;
+        state.showHandles = false;
+        return;
     }
     
     if (state.tool === 'select') {
+        // 1. СНАЧАЛА ПРОВЕРЯЕМ ТОЧКИ
         const point = findPoint(pos.x, pos.y);
         if (point) {
             state.dragType = 'point';
@@ -868,20 +860,30 @@ function onMouseDown(e) {
                 pathIdx: point.pathIdx,
                 pointIdx: point.pointIdx,
                 startX: pos.x,
-                startY: pos.y,
-                originalX: state.paths[point.pathIdx].points[point.pointIdx].x,
-                originalY: state.paths[point.pathIdx].points[point.pointIdx].y
+                startY: pos.y
             };
             state.isDragging = true;
             state.selectedPathIdx = point.pathIdx;
-            state.showHandles = (state.paths[point.pathIdx]?.tool === 'curve');
+            state.showHandles = true;
             updatePanelFromSelected();
             draw();
             return;
         }
         
-        const pathIdx = findPathAt(pos.x, pos.y);
+        // 2. ПОТОМ ПРОВЕРЯЕМ РУЧКИ
+        const handle = findHandle(pos.x, pos.y);
+        if (handle) {
+            state.dragType = 'handle';
+            state.dragData = handle;
+            state.isDragging = true;
+            state.selectedPathIdx = handle.pathIdx;
+            state.showHandles = true;
+            draw();
+            return;
+        }
         
+        // 3. ПОТОМ ПРОВЕРЯЕМ ПУТЬ
+        const pathIdx = findPathAt(pos.x, pos.y);
         if (pathIdx !== -1) {
             state.selectedPathIdx = pathIdx;
             state.dragType = 'path';
@@ -889,10 +891,7 @@ function onMouseDown(e) {
             state.dragData = {
                 pathIdx: pathIdx,
                 offsetX: pos.x - center.x,
-                offsetY: pos.y - center.y,
-                startX: pos.x,
-                startY: pos.y,
-                pointsBackup: JSON.parse(JSON.stringify(state.paths[pathIdx].points))
+                offsetY: pos.y - center.y
             };
             state.isDragging = true;
             state.showHandles = (state.paths[pathIdx]?.tool === 'curve');
@@ -905,36 +904,75 @@ function onMouseDown(e) {
             draw();
         }
     }
-    
+        
+    // Ластик
     if (state.tool === 'erase') {
         eraseAt(pos.x, pos.y);
         return;
     }
     
-    if (['line', 'curve', 'rectangle', 'circle'].includes(state.tool)) {
+    // Остальные инструменты (линия, прямоугольник, круг)
+    if (['line', 'rectangle', 'circle'].includes(state.tool)) {
         state.selectedPathIdx = -1;
         state.currentPath = [{x: pos.x, y: pos.y}];
         state.isDrawing = true;
-        state.showHandles = (state.tool === 'curve');
     }
 }
 
 function onMouseMove(e) {
     const pos = getMousePos(e);
     updateCursor(pos.x, pos.y);
+
+
+    if (state.isDrawing && state.tool === 'curve' && state.currentPath.length === 1) {
+        draw();
+        ctx.strokeStyle = state.color;
+        ctx.lineWidth = state.thickness;
+
+        
+        const start = state.currentPath[0];
+        const end = pos;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        
+        // Временные ручки для предпросмотра
+        const control1 = {x: start.x + dx / 3, y: start.y + dy / 3};
+        const control2 = {x: start.x + dx * 2 / 3, y: start.y + dy * 2 / 3};
+        
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.bezierCurveTo(control1.x, control1.y, control2.x, control2.y, end.x, end.y);
+        ctx.stroke();
+        
+        ctx.setLineDash([]);
+        return;
+    }   
     
     if (state.isDragging && state.dragType === 'handle') {
-        state.paths[state.dragData.pathIdx].points[1] = {x: pos.x, y: pos.y};
+        const path = state.paths[state.dragData.pathIdx];
+        const handleIdx = state.dragData.handleIdx;
+        
+        if (path.tool === 'curve' && path.points.length === 4) {
+            // Для новой кривой с двумя ручками
+            path.points[handleIdx] = {x: pos.x, y: pos.y};
+        } else if (path.points.length === 3) {
+            // Для старой кривой
+            path.points[1] = {x: pos.x, y: pos.y};
+        }
         draw();
         return;
     }
     
     if (state.isDragging && state.dragType === 'point') {
         const {pathIdx, pointIdx} = state.dragData;
-        state.paths[pathIdx].points[pointIdx] = {x: pos.x, y: pos.y};
+        const path = state.paths[pathIdx];
         
-        if (state.paths[pathIdx].tool === 'rectangle' && state.paths[pathIdx].points.length === 4) {
-            updateRectanglePoints(state.paths[pathIdx], pointIdx, pos);
+        // Обновляем позицию точки
+        path.points[pointIdx] = {x: pos.x, y: pos.y};
+        
+        // Если это прямоугольник, обновляем связанные точки
+        if (path.tool === 'rectangle' && path.points.length === 4) {
+            updateRectanglePoints(path, pointIdx, pos);
         }
         
         draw();
@@ -1021,21 +1059,26 @@ function onMouseUp(e) {
                 thickness: state.thickness,
                 color: state.color
             };
+        // В функции onMouseUp, в блоке создания кривой:
         } else if (state.tool === 'curve') {
-            const midX = (state.currentPath[0].x + pos.x) / 2;
-            const midY = (state.currentPath[0].y + pos.y) / 2;
+            const start = state.currentPath[0];
+            const end = pos;
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            
             newPath = {
                 tool: 'curve',
                 points: [
-                    {x: state.currentPath[0].x, y: state.currentPath[0].y},
-                    {x: midX + 30, y: midY - 30},
-                    {x: pos.x, y: pos.y}
+                    {x: start.x, y: start.y},
+                    {x: start.x + dx / 3, y: start.y + dy / 3},
+                    {x: start.x + dx * 2 / 3, y: start.y + dy * 2 / 3},
+                    {x: end.x, y: end.y}
                 ],
                 thickness: state.thickness,
                 color: state.color
             };
             state.showHandles = true;
-            state.lastCreatedCurveIdx = state.paths.length;
+        
         } else if (state.tool === 'rectangle') {
             newPath = {
                 tool: 'rectangle',
@@ -1130,29 +1173,9 @@ function updateCursor(x, y) {
     }
 }
 
-function findHandle(x, y) {
-    const threshold = 20;
-    
-    for (let i = 0; i < state.paths.length; i++) {
-        const path = state.paths[i];
-        
-        if (path.tool === 'curve' && path.points.length === 3) {
-            const handle = path.points[1];
-            const distance = Math.hypot(handle.x - x, handle.y - y);
-            if (distance < threshold) {
-                return {
-                    pathIdx: i,
-                    handleX: handle.x,
-                    handleY: handle.y
-                };
-            }
-        }
-    }
-    return null;
-}
 
 function findPoint(x, y) {
-    const threshold = 12;
+    const threshold = 15;
     
     for (let i = 0; i < state.paths.length; i++) {
         const path = state.paths[i];
@@ -1182,20 +1205,36 @@ function findPathAt(x, y) {
 }
 
 function isPointNearPath(x, y, path) {
-    const baseThreshold = 10;
     const pathThickness = path.thickness || state.thickness;
-    const sizeThreshold = Math.max(baseThreshold, pathThickness + 5);
+    const threshold = Math.max(10, pathThickness + 5);
+    const sizeThreshold = threshold; 
     
-    if (path.tool === 'curve' && path.points.length === 3) {
-        for (let t = 0; t <= 1; t += 0.02) {
-            const point = getPointOnCurve(path.points[0], path.points[1], path.points[2], t);
-            if (Math.hypot(point.x - x, point.y - y) < sizeThreshold) {
+    if (path.tool === 'curve' && path.points.length === 4) {
+        // Проверяем близость к кривой Безье (более точная проверка)
+        for (let t = 0; t <= 1; t += 0.01) {
+            // Формула Безье с двумя ручками
+            const t1 = 1 - t;
+            const point = {
+                x: t1 * t1 * t1 * path.points[0].x + 
+                   3 * t1 * t1 * t * path.points[1].x + 
+                   3 * t1 * t * t * path.points[2].x + 
+                   t * t * t * path.points[3].x,
+                y: t1 * t1 * t1 * path.points[0].y + 
+                   3 * t1 * t1 * t * path.points[1].y + 
+                   3 * t1 * t * t * path.points[2].y + 
+                   t * t * t * path.points[3].y
+            };
+            if (Math.hypot(point.x - x, point.y - y) < threshold) {
                 return true;
             }
         }
-        if (Math.hypot(path.points[1].x - x, path.points[1].y - y) < sizeThreshold + 5) {
+        
+        // Проверяем ручки
+        if (Math.hypot(path.points[1].x - x, path.points[1].y - y) < threshold + 5 ||
+            Math.hypot(path.points[2].x - x, path.points[2].y - y) < threshold + 5) {
             return true;
         }
+    
     } else if (path.tool === 'line' && path.points.length === 2) {
         const dist = distanceToLine(x, y, path.points[0], path.points[1]);
         const lineLength = Math.hypot(
@@ -1287,53 +1326,64 @@ function draw() {
         const pathThickness = path.thickness || state.thickness;
         const pathColor = path.color || state.color;
         
+        // 1. Рисуем подсветку выделенного пути
         if (state.tool === 'select' && idx === state.selectedPathIdx) {
-            ctx.strokeStyle = 'rgba(66, 133, 244, 0.5)';
+            ctx.strokeStyle = 'rgba(66, 133, 244, 0.4)';
             ctx.lineWidth = pathThickness + 8;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
-            
             ctx.beginPath();
             drawPath(ctx, path);
             ctx.stroke();
         }
         
+        // 2. Рисуем сам путь
         ctx.strokeStyle = pathColor;
         ctx.lineWidth = pathThickness;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        
         ctx.beginPath();
         drawPath(ctx, path);
         ctx.stroke();
-        
+    });
+    
+    // 3. РИСУЕМ РУЧКИ И ТОЧКИ (отдельный цикл, после всех линий)
+    state.paths.forEach((path, idx) => {
         const shouldShowHandles = (state.tool === 'curve' && state.showHandles) || 
                                  (state.tool === 'select' && idx === state.selectedPathIdx && path.tool === 'curve');
         
-        if (shouldShowHandles && path.tool === 'curve' && path.points.length === 3) {
-            const handle = path.points[1];
-            const isDraggingThisHandle = state.isDragging && 
-                                         state.dragType === 'handle' && 
-                                         state.dragData?.pathIdx === idx;
-            
-            ctx.fillStyle = isDraggingThisHandle ? 'rgba(255, 50, 50, 0.95)' : 'rgba(255, 100, 100, 0.9)';
-            ctx.strokeStyle = isDraggingThisHandle ? '#ff0000' : '#ff4444';
-            ctx.lineWidth = isDraggingThisHandle ? 3 : 2;
-            
-            ctx.beginPath();
-            ctx.arc(handle.x, handle.y, isDraggingThisHandle ? 12 : 10, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            
-            ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(path.points[0].x, path.points[0].y);
-            ctx.lineTo(handle.x, handle.y);
-            ctx.lineTo(path.points[2].x, path.points[2].y);
-            ctx.stroke();
+        if (shouldShowHandles) {
+            if (path.tool === 'curve' && path.points.length === 4) {
+                // Новая кривая с двумя ручками
+                drawHandles(ctx, path, idx);
+            } else if (path.tool === 'curve' && path.points.length === 3) {
+                // Старая квадратичная кривая
+                const handle = path.points[1];
+                const isDraggingThisHandle = state.isDragging && 
+                                             state.dragType === 'handle' && 
+                                             state.dragData?.pathIdx === idx;
+                
+                ctx.fillStyle = isDraggingThisHandle ? 'rgba(255, 50, 50, 0.95)' : 'rgba(255, 100, 100, 0.9)';
+                ctx.strokeStyle = isDraggingThisHandle ? '#ff0000' : '#ff4444';
+                ctx.lineWidth = isDraggingThisHandle ? 3 : 2;
+                ctx.beginPath();
+                ctx.arc(handle.x, handle.y, isDraggingThisHandle ? 12 : 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                ctx.lineTo(handle.x, handle.y);
+                ctx.lineTo(path.points[2].x, path.points[2].y);
+                ctx.stroke();
+            }
         }
-        
+    });
+    
+    // 4. ТОЧКИ ДЛЯ ВЫБРАННОГО ПУТИ (синие точки, НЕ жёлтые)
+    state.paths.forEach((path, idx) => {
         if (state.tool === 'select' && idx === state.selectedPathIdx) {
             ctx.fillStyle = 'rgba(66, 133, 244, 0.9)';
             ctx.strokeStyle = '#4285F4';
@@ -1341,7 +1391,7 @@ function draw() {
             
             path.points.forEach(point => {
                 ctx.beginPath();
-                ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
+                ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
             });
@@ -1350,9 +1400,18 @@ function draw() {
 }
 
 function drawPath(ctx, path) {
-    if (path.tool === 'curve' && path.points.length === 3) {
+    if (path.tool === 'curve' && path.points.length === 4) {
+        ctx.moveTo(path.points[0].x, path.points[0].y);
+        ctx.bezierCurveTo(
+            path.points[1].x, path.points[1].y,  // первая ручка
+            path.points[2].x, path.points[2].y,  // вторая ручка
+            path.points[3].x, path.points[3].y   // конец
+        );
+    } else if (path.tool === 'curve' && path.points.length === 3) {
+        // Для обратной совместимости со старыми кривыми (квадратичные)
         ctx.moveTo(path.points[0].x, path.points[0].y);
         ctx.quadraticCurveTo(path.points[1].x, path.points[1].y, path.points[2].x, path.points[2].y);
+    
     } else if (path.tool === 'line' && path.points.length === 2) {
         ctx.moveTo(path.points[0].x, path.points[0].y);
         ctx.lineTo(path.points[1].x, path.points[1].y);
@@ -1367,6 +1426,143 @@ function drawPath(ctx, path) {
         const radiusPoint = path.points[1];
         const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
         ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    }
+}
+
+// 2. Создание новой кривой с двумя ручками
+function createBezierCurve(start, end) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    
+    // Ручки на расстоянии 1/3 от начала и конца
+    return {
+        tool: 'curve',
+        points: [
+            {x: start.x, y: start.y},                    // начало
+            {x: start.x + dx * 0.33, y: start.y + dy * 0.33}, // первая ручка
+            {x: start.x + dx * 0.66, y: start.y + dy * 0.66}, // вторая ручка
+            {x: end.x, y: end.y}                         // конец
+        ],
+        thickness: state.thickness,
+        color: state.color
+    };
+}
+
+// 3. Поиск ручек (для выделения и перетаскивания)
+function findHandle(x, y) {
+    const threshold = 20;
+    
+    for (let i = 0; i < state.paths.length; i++) {
+        const path = state.paths[i];
+        
+        // ДЛЯ НОВЫХ КРИВЫХ (4 точки - Безье с двумя ручками)
+        if (path.tool === 'curve' && path.points.length === 4) {
+            // Проверяем первую ручку (красная, индекс 1)
+            const handle1 = path.points[1];
+            const dist1 = Math.hypot(handle1.x - x, handle1.y - y);
+            if (dist1 < threshold) {
+                return { pathIdx: i, handleIdx: 1 };
+            }
+            
+            // Проверяем вторую ручку (синяя, индекс 2)
+            const handle2 = path.points[2];
+            const dist2 = Math.hypot(handle2.x - x, handle2.y - y);
+            if (dist2 < threshold) {
+                return { pathIdx: i, handleIdx: 2 };
+            }
+            
+            // Проверяем начальную точку (жёлтая, индекс 0)
+            const start = path.points[0];
+            if (Math.hypot(start.x - x, start.y - y) < threshold) {
+                return { pathIdx: i, pointIdx: 0 };
+            }
+            
+            // Проверяем конечную точку (жёлтая, индекс 3)
+            const end = path.points[3];
+            if (Math.hypot(end.x - x, end.y - y) < threshold) {
+                return { pathIdx: i, pointIdx: 3 };
+            }
+        }
+        
+        // ДЛЯ СТАРЫХ КРИВЫХ (3 точки - квадратичные)
+        if (path.tool === 'curve' && path.points.length === 3) {
+            const handle = path.points[1];
+            if (Math.hypot(handle.x - x, handle.y - y) < threshold) {
+                return { pathIdx: i, handleIdx: 1, isQuadratic: true };
+            }
+        }
+    }
+    return null;
+}
+
+// 4. Отрисовка ручек и вспомогательных линий
+function drawHandles(ctx, path, idx) {
+    if (path.tool === 'curve' && path.points.length === 4) {
+        const start = path.points[0];
+        const handle1 = path.points[1];
+        const handle2 = path.points[2];
+        const end = path.points[3];
+        
+        const isDraggingHandle1 = state.isDragging && 
+                                  state.dragType === 'handle' && 
+                                  state.dragData?.pathIdx === idx &&
+                                  state.dragData?.handleIdx === 1;
+        
+        const isDraggingHandle2 = state.isDragging && 
+                                  state.dragType === 'handle' && 
+                                  state.dragData?.pathIdx === idx &&
+                                  state.dragData?.handleIdx === 2;
+        
+        // Вспомогательные линии
+        ctx.save();
+        ctx.strokeStyle = 'rgba(150, 150, 150, 0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(handle1.x, handle1.y);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.lineTo(handle2.x, handle2.y);
+        ctx.stroke();
+        
+        ctx.setLineDash([]);
+        
+        // Ручка 1 (КРАСНАЯ)
+        ctx.fillStyle = isDraggingHandle1 ? 'rgba(255, 50, 50, 0.95)' : 'rgba(255, 80, 80, 0.9)';
+        ctx.strokeStyle = '#cc4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(handle1.x, handle1.y, isDraggingHandle1 ? 11 : 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        // Ручка 2 (СИНЯЯ)
+        ctx.fillStyle = isDraggingHandle2 ? 'rgba(50, 100, 255, 0.95)' : 'rgba(80, 120, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(handle2.x, handle2.y, isDraggingHandle2 ? 11 : 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        // ЖЁЛТЫЕ ТОЧКИ (начало и конец) - БОЛЬШИЕ И ЗАМЕТНЫЕ
+        ctx.fillStyle = 'rgba(255, 200, 0, 0.95)';
+        ctx.strokeStyle = '#cc9900';
+        ctx.lineWidth = 2;
+        
+        ctx.beginPath();
+        ctx.arc(start.x, start.y, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(end.x, end.y, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.restore();
     }
 }
 
