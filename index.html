@@ -494,6 +494,24 @@
         .right-panel .panel-content::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
+
+        <!-- #solidBgControl, #gradientBgControl { -->
+        <!--     display: flex; /* или flex, в зависимости от контекста */ -->
+        <!--     margin-top: 12px; -->
+        <!--     padding: 8px 0; -->
+        <!-- } -->
+        
+        .property-row {
+            margin-bottom: 12px;
+        }
+        
+        #gradientColor1, #gradientColor2 {
+            width: 60px;
+            height: 32px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -593,6 +611,62 @@
                 </div>
 
                 <div class="panel-section">
+                    <h3>
+                        Фон
+                    </h3>
+                    
+                    <div class="property-group">
+                        <!-- Выбор типа фона -->
+                        <div class="property-row">
+                            <label>Тип фона</label>
+                            <select id="bgType" style="flex: 1;">
+                                <option value="none">Прозрачный</option>
+                                <option value="solid">Сплошной цвет</option>
+                                <option value="gradient">Градиент</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Контролы для сплошного цвета -->
+                        <div id="solidBgControl" style="display: none;">
+                            <div class="property-row">
+                                <label>Цвет</label>
+                                <div class="color-preview" id="bgColorPreview" style="background: #ffffff; width: 40px; height: 40px;" onclick="document.getElementById('bgColor').click()"></div>
+                                <input type="color" id="bgColor" value="#ffffff" style="position: absolute; opacity: 0;">
+                            </div>
+                        </div>
+                        
+                        <!-- Контролы для градиента -->
+                        <div id="gradientBgControl" style="display: none;">
+                            <div class="property-row">
+                                <label>Тип</label>
+                                <select id="gradientType" style="flex: 1;">
+                                    <option value="linear">Линейный</option>
+                                    <option value="radial">Радиальный</option>
+                                </select>
+                            </div>
+                            
+                            <div class="property-row">
+                                <label>Цвет 1</label>
+                                <div class="color-preview" id="gradientColor1Preview" style="background: #3b82f6; width: 40px; height: 40px; cursor: pointer;"></div>
+                                <input type="color" id="gradientColor1" value="#3b82f6" style="position: absolute; opacity: 0;">
+                            </div>
+                            
+                            <div class="property-row">
+                                <label>Цвет 2</label>
+                                <div class="color-preview" id="gradientColor2Preview" style="background: #8b5cf6; width: 40px; height: 40px; cursor: pointer;"></div>
+                                <input type="color" id="gradientColor2" value="#8b5cf6" style="position: absolute; opacity: 0;">
+                            </div>
+                            
+                            <div class="property-row">
+                                <label>Угол</label>
+                                <input type="range" id="gradientAngle" min="0" max="360" value="90" style="flex: 1;">
+                                <span class="thickness-value" id="angleVal" style="min-width: 45px;">90°</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
                     <h3>Сетка</h3>
                     <div class="property-group">
                         <div class="checkbox-group">
@@ -681,7 +755,17 @@ let state = {
     snap: true,
     gridSize: 32,
     showHandles: false,
-    lastCreatedCurveIdx: -1
+    lastCreatedCurveIdx: -1,
+    background: {
+            type: 'none', // 'none', 'solid', 'gradient'
+            solidColor: '#ffffff',
+            gradient: {
+                type: 'linear', // 'linear', 'radial'
+                color1: '#3b82f6',
+                color2: '#8b5cf6',
+                angle: 90
+            }
+        }
 };
 
 // Пресеты для разных размеров иконок (канвас 512×512)
@@ -1320,6 +1404,39 @@ function eraseAt(x, y) {
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // ========== РИСУЕМ ФОН ==========
+    if (state.background.type !== 'none') {
+        if (state.background.type === 'solid') {
+            ctx.fillStyle = state.background.solidColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        } else if (state.background.type === 'gradient') {
+            const grad = state.background.gradient;
+            let gradient;
+            
+            if (grad.type === 'linear') {
+                // Линейный градиент
+                const angleRad = (grad.angle * Math.PI) / 180;
+                const x1 = canvas.width / 2 - Math.cos(angleRad) * canvas.width / 2;
+                const y1 = canvas.height / 2 - Math.sin(angleRad) * canvas.height / 2;
+                const x2 = canvas.width / 2 + Math.cos(angleRad) * canvas.width / 2;
+                const y2 = canvas.height / 2 + Math.sin(angleRad) * canvas.height / 2;
+                gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+            } else {
+                // Радиальный градиент
+                gradient = ctx.createRadialGradient(
+                    canvas.width / 2, canvas.height / 2, 0,
+                    canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) / 2
+                );
+            }
+            
+            gradient.addColorStop(0, grad.color1);
+            gradient.addColorStop(1, grad.color2);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+    }
+    
     drawGrid();
     
     state.paths.forEach((path, idx) => {
@@ -1812,6 +1929,36 @@ function exportPNG() {
     const tempCtx = tempCanvas.getContext('2d');
     
     tempCtx.imageSmoothingEnabled = false;
+
+    // Рисуем фон ПЕРЕД масштабированием и трансляцией
+        if (state.background.type !== 'none') {
+            if (state.background.type === 'solid') {
+                tempCtx.fillStyle = state.background.solidColor;
+                tempCtx.fillRect(0, 0, finalWidth, finalHeight);
+            } else if (state.background.type === 'gradient') {
+                const grad = state.background.gradient;
+                let gradient;
+                
+                if (grad.type === 'linear') {
+                    const angleRad = (grad.angle * Math.PI) / 180;
+                    const x1 = finalWidth / 2 - Math.cos(angleRad) * finalWidth / 2;
+                    const y1 = finalHeight / 2 - Math.sin(angleRad) * finalHeight / 2;
+                    const x2 = finalWidth / 2 + Math.cos(angleRad) * finalWidth / 2;
+                    const y2 = finalHeight / 2 + Math.sin(angleRad) * finalHeight / 2;
+                    gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
+                } else {
+                    gradient = tempCtx.createRadialGradient(
+                        finalWidth / 2, finalHeight / 2, 0,
+                        finalWidth / 2, finalHeight / 2, Math.max(finalWidth, finalHeight) / 2
+                    );
+                }
+                
+                gradient.addColorStop(0, grad.color1);
+                gradient.addColorStop(1, grad.color2);
+                tempCtx.fillStyle = gradient;
+                tempCtx.fillRect(0, 0, finalWidth, finalHeight);
+            }
+        }
     
     tempCtx.save();
     tempCtx.scale(scaleFactor, scaleFactor);
@@ -1998,6 +2145,169 @@ if (undoBtn) undoBtn.onclick = undo;
 if (clearBtn) clearBtn.onclick = clearCanvas;
 if (exportSVGBtn) exportSVGBtn.onclick = exportSVG;
 if (exportPNGBtn) exportPNGBtn.onclick = exportPNG;
+
+// ========== УПРАВЛЕНИЕ ФОНОМ ==========
+const bgType = document.getElementById('bgType');
+const solidBgControl = document.getElementById('solidBgControl');
+const gradientBgControl = document.getElementById('gradientBgControl');
+const bgColor = document.getElementById('bgColor');
+const bgColorPreview = document.getElementById('bgColorPreview');
+
+// Элементы для градиента
+const gradientColor1 = document.getElementById('gradientColor1');
+const gradientColor1Preview = document.getElementById('gradientColor1Preview');
+const gradientColor2 = document.getElementById('gradientColor2');
+const gradientColor2Preview = document.getElementById('gradientColor2Preview');
+const gradientType = document.getElementById('gradientType');
+const gradientAngle = document.getElementById('gradientAngle');
+const angleVal = document.getElementById('angleVal');
+
+if (bgType) {
+    bgType.onchange = (e) => {
+        state.background.type = e.target.value;
+        
+        // Показываем/скрываем контролы
+        solidBgControl.style.display = state.background.type === 'solid' ? 'flex' : 'none';
+        gradientBgControl.style.display = state.background.type === 'gradient' ? 'block' : 'none';
+        
+        draw();
+        saveBackgroundState();
+    };
+}
+
+if (bgColor) {
+    bgColor.onchange = (e) => {
+        state.background.solidColor = e.target.value;
+        if (bgColorPreview) bgColorPreview.style.background = e.target.value;
+        draw();
+        saveBackgroundState();
+    };
+}
+
+if (bgColorPreview) {
+    bgColorPreview.onclick = () => bgColor.click();
+}
+
+// Обработчики для градиента
+if (gradientColor1 && gradientColor1Preview) {
+    gradientColor1.onchange = (e) => {
+        state.background.gradient.color1 = e.target.value;
+        gradientColor1Preview.style.background = e.target.value;
+        draw();
+        saveBackgroundState();
+    };
+    
+    gradientColor1Preview.onclick = () => gradientColor1.click();
+}
+
+if (gradientColor2 && gradientColor2Preview) {
+    gradientColor2.onchange = (e) => {
+        state.background.gradient.color2 = e.target.value;
+        gradientColor2Preview.style.background = e.target.value;
+        draw();
+        saveBackgroundState();
+    };
+    
+    gradientColor2Preview.onclick = () => gradientColor2.click();
+}
+
+if (gradientType) {
+    gradientType.onchange = (e) => {
+        state.background.gradient.type = e.target.value;
+        draw();
+        saveBackgroundState();
+    };
+}
+
+if (gradientAngle) {
+    gradientAngle.oninput = (e) => {
+        const angle = +e.target.value;
+        state.background.gradient.angle = angle;
+        if (angleVal) angleVal.textContent = `${angle}°`;
+        draw();
+        saveBackgroundState();
+    };
+}
+
+// Функция сохранения фона в историю
+function saveBackgroundState() {
+    // Сохраняем состояние фона вместе с paths
+    const fullState = {
+        paths: state.paths,
+        background: JSON.parse(JSON.stringify(state.background))
+    };
+    state.history.push(fullState);
+    if (state.history.length > 50) state.history.shift();
+}
+
+// Модифицируем saveState для работы с фоном
+const originalSaveState = saveState;
+saveState = function() {
+    const fullState = {
+        paths: state.paths,
+        background: JSON.parse(JSON.stringify(state.background))
+    };
+    state.history.push(fullState);
+    if (state.history.length > 50) state.history.shift();
+};
+
+// Модифицируем undo для восстановления фона
+const originalUndo = undo;
+undo = function() {
+    if (state.history.length > 1) {
+        state.history.pop();
+        const lastState = state.history[state.history.length - 1];
+        state.paths = JSON.parse(JSON.stringify(lastState.paths));
+        state.background = JSON.parse(JSON.stringify(lastState.background));
+        
+        // Обновляем UI
+        if (bgType) bgType.value = state.background.type;
+        if (bgColor) bgColor.value = state.background.solidColor;
+        if (bgColorPreview) bgColorPreview.style.background = state.background.solidColor;
+        if (gradientColor1) gradientColor1.value = state.background.gradient.color1;
+        if (gradientColor2) gradientColor2.value = state.background.gradient.color2;
+        if (gradientType) gradientType.value = state.background.gradient.type;
+        if (gradientAngle) gradientAngle.value = state.background.gradient.angle;
+        if (angleVal) angleVal.textContent = `${state.background.gradient.angle}°`;
+        
+        solidBgControl.style.display = state.background.type === 'solid' ? 'block' : 'none';
+        gradientBgControl.style.display = state.background.type === 'gradient' ? 'block' : 'none';
+        
+        state.selectedPathIdx = -1;
+        state.showHandles = false;
+        draw();
+    }
+};
+
+// Модифицируем clearCanvas для сброса фона
+const originalClearCanvas = clearCanvas;
+clearCanvas = function() {
+    state.paths = [];
+    state.background = {
+        type: 'none',
+        solidColor: '#ffffff',
+        gradient: {
+            type: 'linear',
+            color1: '#3b82f6',
+            color2: '#8b5cf6',
+            angle: 90
+        }
+    };
+    state.history = [{
+        paths: [],
+        background: JSON.parse(JSON.stringify(state.background))
+    }];
+    state.selectedPathIdx = -1;
+    state.showHandles = false;
+    
+    // Обновляем UI
+    if (bgType) bgType.value = 'none';
+    solidBgControl.style.display = 'none';
+    gradientBgControl.style.display = 'none';
+    
+    draw();
+};
+
 
 // Запуск
 init();
@@ -2282,6 +2592,37 @@ function exportPNGWithSize(size, filename) {
     tempCanvas.width = size;
     tempCanvas.height = size;
     const tempCtx = tempCanvas.getContext('2d');
+
+    // ========== ОТРИСОВКА ФОНА ==========
+        if (state.background.type !== 'none') {
+            if (state.background.type === 'solid') {
+                tempCtx.fillStyle = state.background.solidColor;
+                tempCtx.fillRect(0, 0, size, size);
+            } else if (state.background.type === 'gradient') {
+                const grad = state.background.gradient;
+                let gradient;
+                
+                if (grad.type === 'linear') {
+                    const angleRad = (grad.angle * Math.PI) / 180;
+                    const x1 = size / 2 - Math.cos(angleRad) * size / 2;
+                    const y1 = size / 2 - Math.sin(angleRad) * size / 2;
+                    const x2 = size / 2 + Math.cos(angleRad) * size / 2;
+                    const y2 = size / 2 + Math.sin(angleRad) * size / 2;
+                    gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
+                } else {
+                    gradient = tempCtx.createRadialGradient(
+                        size / 2, size / 2, 0,
+                        size / 2, size / 2, size / 2
+                    );
+                }
+                
+                gradient.addColorStop(0, grad.color1);
+                gradient.addColorStop(1, grad.color2);
+                tempCtx.fillStyle = gradient;
+                tempCtx.fillRect(0, 0, size, size);
+            }
+        }
+        // ========== КОНЕЦ БЛОКА ФОНА ==========
     
     // Центрируем иконку
     const xOffset = (size - finalWidth) / 2;
@@ -2386,6 +2727,37 @@ function generatePNGDataURL(targetSize) {
         
         // Отключаем сглаживание для чётких пикселей
         tempCtx.imageSmoothingEnabled = false;
+
+        // ========== ОТРИСОВКА ФОНА ==========
+                if (state.background.type !== 'none') {
+                    if (state.background.type === 'solid') {
+                        tempCtx.fillStyle = state.background.solidColor;
+                        tempCtx.fillRect(0, 0, targetSize, targetSize);
+                    } else if (state.background.type === 'gradient') {
+                        const grad = state.background.gradient;
+                        let gradient;
+                        
+                        if (grad.type === 'linear') {
+                            const angleRad = (grad.angle * Math.PI) / 180;
+                            const x1 = targetSize / 2 - Math.cos(angleRad) * targetSize / 2;
+                            const y1 = targetSize / 2 - Math.sin(angleRad) * targetSize / 2;
+                            const x2 = targetSize / 2 + Math.cos(angleRad) * targetSize / 2;
+                            const y2 = targetSize / 2 + Math.sin(angleRad) * targetSize / 2;
+                            gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
+                        } else {
+                            gradient = tempCtx.createRadialGradient(
+                                targetSize / 2, targetSize / 2, 0,
+                                targetSize / 2, targetSize / 2, targetSize / 2
+                            );
+                        }
+                        
+                        gradient.addColorStop(0, grad.color1);
+                        gradient.addColorStop(1, grad.color2);
+                        tempCtx.fillStyle = gradient;
+                        tempCtx.fillRect(0, 0, targetSize, targetSize);
+                    }
+                }
+                // ========== КОНЕЦ БЛОКА ФОНА ==========
         
         tempCtx.save();
         tempCtx.scale(scale, scale);
