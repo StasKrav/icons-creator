@@ -512,7 +512,66 @@
             border-radius: 8px;
             cursor: pointer;
         }
-    </style>
+
+        /* ========== ВКЛАДКИ ========== */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            background: #f1f5f9;
+            padding: 4px;
+            border-radius: 40px;
+        }
+        
+        .tab-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 32px;
+            background: transparent;
+            font-size: 13px;
+            font-weight: 500;
+            color: #64748b;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .tab-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+        }
+        
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.5);
+            color: #3b82f6;
+        }
+        
+        .tab-btn.active {
+            background: white;
+            color: #3b82f6;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.2s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+</style>
 </head>
 <body>
     <div class="app">
@@ -585,20 +644,41 @@
         </div>
 
         <!-- ПРАВАЯ ПАНЕЛЬ (сворачиваемая) -->
-        <div class="right-panel" id="rightPanel">
-            <div class="panel-toggle" id="panelToggle">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M15 18l-6-6 6-6"/>
-                </svg>
+    <div class="right-panel" id="rightPanel">
+        <div class="panel-toggle" id="panelToggle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 18l-6-6 6-6"/>
+            </svg>
+        </div>
+        <div class="panel-content">
+            
+            <!-- ВКЛАДКИ -->
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    Настройки
+                </button>
+                <button class="tab-btn" data-tab="actions">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                    Действия
+                </button>
             </div>
-            <div class="panel-content">
+    
+            <!-- ВКЛАДКА: НАСТРОЙКИ -->
+            <div class="tab-content active" id="tab-settings">
+                <!-- Стиль линии -->
                 <div class="panel-section">
                     <h3>Стиль линии</h3>
                     <div class="property-group">
                         <div class="property-row">
                             <label>Цвет</label>
                             <div class="color-preview" id="colorPreview" style="background: #3b82f6" onclick="document.getElementById('color').click()"></div>
-                            <input type="color" id="color" value="#3b82f6" style="position: absolute; opacity: 0; width: 0; height: 0;">
+                            <input type="color" id="color" value="#3b82f6" style="position: absolute; opacity: 0;">
                         </div>
                         <div class="property-row">
                             <label>Толщина</label>
@@ -609,14 +689,11 @@
                         </div>
                     </div>
                 </div>
-
+    
+                <!-- Фон -->
                 <div class="panel-section">
-                    <h3>
-                        Фон
-                    </h3>
-                    
+                    <h3>Фон</h3>
                     <div class="property-group">
-                        <!-- Выбор типа фона -->
                         <div class="property-row">
                             <label>Тип фона</label>
                             <select id="bgType" style="flex: 1;">
@@ -626,7 +703,6 @@
                             </select>
                         </div>
                         
-                        <!-- Контролы для сплошного цвета -->
                         <div id="solidBgControl" style="display: none;">
                             <div class="property-row">
                                 <label>Цвет</label>
@@ -635,7 +711,6 @@
                             </div>
                         </div>
                         
-                        <!-- Контролы для градиента -->
                         <div id="gradientBgControl" style="display: none;">
                             <div class="property-row">
                                 <label>Тип</label>
@@ -644,19 +719,16 @@
                                     <option value="radial">Радиальный</option>
                                 </select>
                             </div>
-                            
                             <div class="property-row">
                                 <label>Цвет 1</label>
                                 <div class="color-preview" id="gradientColor1Preview" style="background: #3b82f6; width: 40px; height: 40px; cursor: pointer;"></div>
                                 <input type="color" id="gradientColor1" value="#3b82f6" style="position: absolute; opacity: 0;">
                             </div>
-                            
                             <div class="property-row">
                                 <label>Цвет 2</label>
                                 <div class="color-preview" id="gradientColor2Preview" style="background: #8b5cf6; width: 40px; height: 40px; cursor: pointer;"></div>
                                 <input type="color" id="gradientColor2" value="#8b5cf6" style="position: absolute; opacity: 0;">
                             </div>
-                            
                             <div class="property-row">
                                 <label>Угол</label>
                                 <input type="range" id="gradientAngle" min="0" max="360" value="90" style="flex: 1;">
@@ -665,7 +737,8 @@
                         </div>
                     </div>
                 </div>
-
+    
+                <!-- Сетка -->
                 <div class="panel-section">
                     <h3>Сетка</h3>
                     <div class="property-group">
@@ -675,13 +748,16 @@
                         <div class="property-row">
                             <label>Размер сетки</label>
                             <select id="gridSize">
-                                <option value="8">8 px</option><option value="16">16 px</option>
-                                <option value="24">24 px</option><option value="32" selected>32 px</option>
+                                <option value="8">8 px</option>
+                                <option value="16">16 px</option>
+                                <option value="24">24 px</option>
+                                <option value="32" selected>32 px</option>
                             </select>
                         </div>
                     </div>
                 </div>
-
+    
+                <!-- Режим иконки -->
                 <div class="panel-section">
                     <h3>Режим иконки</h3>
                     <div class="property-group">
@@ -698,17 +774,34 @@
                         </div>
                     </div>
                 </div>
-
+            </div>
+    
+            <!-- ВКЛАДКА: ДЕЙСТВИЯ -->
+            <div class="tab-content" id="tab-actions">
                 <div class="panel-section">
-                    <h3>Действия</h3>
+                    <h3>Правка</h3>
                     <div class="action-buttons">
-                        <button class="action-btn" id="undoBtn">Отменить</button>
-                        <button class="action-btn danger" id="clearBtn">Очистить всё</button>
-                        <hr>
-                        <button class="action-btn" id="exportSVGBtn">Экспорт SVG</button>
-                        <button class="action-btn primary" id="exportPNGBtn">Экспорт PNG</button>
+                        <button class="action-btn" id="undoBtn">
+                            Отменить
+                        </button>
+                        <button class="action-btn danger" id="clearBtn">
+                            Очистить всё
+                        </button>
                     </div>
                 </div>
+    
+                <div class="panel-section">
+                    <h3>Экспорт</h3>
+                    <div class="action-buttons">
+                        <button class="action-btn" id="exportSVGBtn">
+                            Экспорт SVG
+                        </button>
+                        <button class="action-btn primary" id="exportPNGBtn">
+                            Экспорт PNG
+                        </button>
+                    </div>
+                </div>
+    
                 <div class="panel-section">
                     <h3>Веб-экспорт</h3>
                     <div class="action-buttons">
@@ -2315,6 +2408,23 @@ init();
 console.log('Векторный редактор инициализирован');
 
 // ========== ПРАВАЯ ПАНЕЛЬ (сворачивание) ==========
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+
+tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tabId = btn.dataset.tab;
+        
+        // Обновляем активные кнопки
+        tabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        // Обновляем активный контент
+        tabContents.forEach(content => content.classList.remove('active'));
+        document.getElementById(`tab-${tabId}`).classList.add('active');
+    });
+});
+
 const rightPanel = document.getElementById('rightPanel');
 const panelToggle = document.getElementById('panelToggle');
 
