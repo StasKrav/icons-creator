@@ -968,6 +968,7 @@ function init() {
     
     updateUI();
     draw();
+    initHistory();
 }
 
 // Функция обновления панели настроек из выбранного объекта
@@ -1015,6 +1016,7 @@ function onMouseDown(e) {
             state.selectedPathIdx = pathIdx;
             state.showHandles = true;
             updatePanelFromSelected();
+            saveState();
             draw();
             return;
         }
@@ -1484,14 +1486,21 @@ function distanceToLine(x, y, p1, p2) {
 }
 
 function eraseAt(x, y) {
+    let deleted = false;
     state.paths = state.paths.filter((path, idx) => {
         if (idx === state.selectedPathIdx) {
             state.selectedPathIdx = -1;
         }
-        return !isPointNearPath(x, y, path);
+        const willDelete = isPointNearPath(x, y, path);
+        if (willDelete) deleted = true;
+        return !willDelete;
     });
+    
+    if (deleted) {
+        saveState(); // <-- ДОБАВИТЬ
+    }
+    
     state.showHandles = false;
-    saveState();
     draw();
 }
 
@@ -1834,28 +1843,134 @@ function drawGrid() {
     }
 }
 
+// ========== ИСТОРИЯ ДЕЙСТВИЙ (ПОЛНОСТЬЮ ИСПРАВЛЕНА) ==========
+
+// Инициализация истории
+function initHistory() {
+    state.history = [];
+    // Сохраняем начальное состояние
+    const fullState = {
+        paths: JSON.parse(JSON.stringify(state.paths)),
+        background: JSON.parse(JSON.stringify(state.background))
+    };
+    state.history.push(fullState);
+    console.log('✅ История инициализирована, шагов:', state.history.length);
+}
+
+// Сохранение состояния
 function saveState() {
-    state.history.push(JSON.parse(JSON.stringify(state.paths)));
-    if (state.history.length > 50) state.history.shift();
-}
-
-function undo() {
-    if (state.history.length > 1) {
-        state.history.pop();
-        state.paths = JSON.parse(JSON.stringify(state.history[state.history.length - 1]));
-        state.selectedPathIdx = -1;
-        state.showHandles = false;
-        draw();
+    const fullState = {
+        paths: JSON.parse(JSON.stringify(state.paths)),
+        background: JSON.parse(JSON.stringify(state.background))
+    };
+    state.history.push(fullState);
+    
+    // Ограничиваем историю 50 шагами
+    while (state.history.length > 50) {
+        state.history.shift();
     }
+    
+    console.log('💾 Состояние сохранено, всего шагов:', state.history.length);
 }
 
-function clearCanvas() {
-    state.paths = [];
-    state.history = [[]];
+// Отмена действия
+function undo() {
+    console.log('⏪ Undo вызван, история:', state.history.length);
+    
+    if (state.history.length <= 1) {
+        console.log('⚠️ Нечего отменять');
+        return false;
+    }
+    
+    // Удаляем текущее состояние
+    state.history.pop();
+    
+    // Загружаем предыдущее
+    const lastState = state.history[state.history.length - 1];
+    
+    // Восстанавливаем пути
+    state.paths = JSON.parse(JSON.stringify(lastState.paths));
+    
+    // Восстанавливаем фон
+    state.background = JSON.parse(JSON.stringify(lastState.background));
+    
+    // Обновляем UI фона
+    updateBackgroundUI();
+    
+    // Сбрасываем выделение
     state.selectedPathIdx = -1;
     state.showHandles = false;
+    state.isDrawing = false;
+    state.isDragging = false;
+    
+    // Перерисовываем
+    draw();
+    
+    console.log('✅ Отмена выполнена, осталось шагов:', state.history.length);
+    return true;
+}
+
+// Повтор действия (Redo) - исправлен
+function redo() {
+    console.log('⏩ Redo пока не реализован (нужен отдельный стек)');
+    // Для полноценного redo нужен отдельный стек (redoHistory)
+    // Пока просто показываем сообщение
+    const status = document.createElement('div');
+    status.className = 'status-bar';
+    status.textContent = 'Redo будет в следующей версии';
+    status.style.bottom = '80px';
+    document.body.appendChild(status);
+    setTimeout(() => status.remove(), 1500);
+}
+
+// Очистка всего (исправлена - без переопределения)
+function clearCanvas() {
+    console.log('🗑️ Очистка канваса');
+    
+    state.paths = [];
+    state.background = {
+        type: 'none',
+        solidColor: '#ffffff',
+        gradient: {
+            type: 'linear',
+            color1: '#3b82f6',
+            color2: '#8b5cf6',
+            angle: 90
+        }
+    };
+    
+    state.selectedPathIdx = -1;
+    state.showHandles = false;
+    state.isDrawing = false;
+    state.isDragging = false;
+    
+    // Обновляем UI фона
+    updateBackgroundUI();
+    
+    // Сохраняем в историю
+    saveState();
+    
     draw();
 }
+
+// Обновление UI фона (вынесено в отдельную функцию)
+function updateBackgroundUI() {
+    if (bgType) bgType.value = state.background.type;
+    if (bgColor) bgColor.value = state.background.solidColor;
+    if (bgColorPreview) bgColorPreview.style.background = state.background.solidColor;
+    if (gradientColor1) gradientColor1.value = state.background.gradient.color1;
+    if (gradientColor1Preview) gradientColor1Preview.style.background = state.background.gradient.color1;
+    if (gradientColor2) gradientColor2.value = state.background.gradient.color2;
+    if (gradientColor2Preview) gradientColor2Preview.style.background = state.background.gradient.color2;
+    if (gradientType) gradientType.value = state.background.gradient.type;
+    if (gradientAngle) gradientAngle.value = state.background.gradient.angle;
+    if (angleVal) angleVal.textContent = `${state.background.gradient.angle}°`;
+    
+    // Показываем/скрываем контролы фона
+    if (solidBgControl) solidBgControl.style.display = state.background.type === 'solid' ? 'flex' : 'none';
+    if (gradientBgControl) gradientBgControl.style.display = state.background.type === 'gradient' ? 'block' : 'none';
+}
+
 
 function exportSVG() {
     let minX = Infinity, minY = Infinity;
@@ -1881,6 +1996,16 @@ function exportSVG() {
             minY = Math.min(minY, center.y - radius - lineOffset);
             maxX = Math.max(maxX, center.x + radius + lineOffset);
             maxY = Math.max(maxY, center.y + radius + lineOffset);
+        }
+        
+        // Для кривых Безье с 4 точками нужно учитывать ручки
+        if (path.tool === 'curve' && path.points.length === 4) {
+            const handle1 = path.points[1];
+            const handle2 = path.points[2];
+            minX = Math.min(minX, handle1.x - lineOffset, handle2.x - lineOffset);
+            minY = Math.min(minY, handle1.y - lineOffset, handle2.y - lineOffset);
+            maxX = Math.max(maxX, handle1.x + lineOffset, handle2.x + lineOffset);
+            maxY = Math.max(maxY, handle1.y + lineOffset, handle2.y + lineOffset);
         }
         
         if (path.tool === 'curve' && path.points.length === 3) {
@@ -1933,11 +2058,22 @@ function exportSVG() {
             );
             paths += `<path d="M${points[0]} L${points[1]}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
             
+        } else if (path.tool === 'curve' && path.points.length === 4) {
+            // Кривая Безье с двумя ручками (кубическая)
+            const p0 = path.points[0];
+            const p1 = path.points[1];
+            const p2 = path.points[2];
+            const p3 = path.points[3];
+            
+            paths += `<path d="M${p0.x + offsetX},${p0.y + offsetY} C${p1.x + offsetX},${p1.y + offsetY} ${p2.x + offsetX},${p2.y + offsetY} ${p3.x + offsetX},${p3.y + offsetY}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
+            
         } else if (path.tool === 'curve' && path.points.length === 3) {
-            const points = path.points.map(p => 
-                `${p.x + offsetX},${p.y + offsetY}`
-            );
-            paths += `<path d="M${points[0]} Q${points[1]} ${points[2]}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
+            // Квадратичная кривая (для обратной совместимости)
+            const p0 = path.points[0];
+            const p1 = path.points[1];
+            const p2 = path.points[2];
+            
+            paths += `<path d="M${p0.x + offsetX},${p0.y + offsetY} Q${p1.x + offsetX},${p1.y + offsetY} ${p2.x + offsetX},${p2.y + offsetY}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
         }
     });
     
@@ -2132,6 +2268,7 @@ function download(content, filename) {
     URL.revokeObjectURL(url);
 }
 
+// В функции onKeyDown, убедитесь, что этот код есть:
 function onKeyDown(e) {
     if (e.key === 'g' || e.key === 'G') {
         state.snap = !state.snap;
@@ -2142,11 +2279,14 @@ function onKeyDown(e) {
         state.paths.splice(state.selectedPathIdx, 1);
         state.selectedPathIdx = -1;
         state.showHandles = false;
-        saveState();
+        saveState(); // <-- ВАЖНО: сохраняем после удаления
         draw();
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
-        undo();
+        undo(); // <-- Должно работать
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redo(); // Для полноты
     }
 }
 
@@ -2264,7 +2404,7 @@ if (bgType) {
         gradientBgControl.style.display = state.background.type === 'gradient' ? 'block' : 'none';
         
         draw();
-        saveBackgroundState();
+        saveState();
     };
 }
 
@@ -2273,7 +2413,7 @@ if (bgColor) {
         state.background.solidColor = e.target.value;
         if (bgColorPreview) bgColorPreview.style.background = e.target.value;
         draw();
-        saveBackgroundState();
+        saveState();
     };
 }
 
@@ -2287,7 +2427,7 @@ if (gradientColor1 && gradientColor1Preview) {
         state.background.gradient.color1 = e.target.value;
         gradientColor1Preview.style.background = e.target.value;
         draw();
-        saveBackgroundState();
+        saveState();
     };
     
     gradientColor1Preview.onclick = () => gradientColor1.click();
@@ -2298,7 +2438,7 @@ if (gradientColor2 && gradientColor2Preview) {
         state.background.gradient.color2 = e.target.value;
         gradientColor2Preview.style.background = e.target.value;
         draw();
-        saveBackgroundState();
+        saveState();
     };
     
     gradientColor2Preview.onclick = () => gradientColor2.click();
@@ -2308,7 +2448,7 @@ if (gradientType) {
     gradientType.onchange = (e) => {
         state.background.gradient.type = e.target.value;
         draw();
-        saveBackgroundState();
+        saveState();
     };
 }
 
@@ -2318,88 +2458,10 @@ if (gradientAngle) {
         state.background.gradient.angle = angle;
         if (angleVal) angleVal.textContent = `${angle}°`;
         draw();
-        saveBackgroundState();
+        saveState();
     };
 }
 
-// Функция сохранения фона в историю
-function saveBackgroundState() {
-    // Сохраняем состояние фона вместе с paths
-    const fullState = {
-        paths: state.paths,
-        background: JSON.parse(JSON.stringify(state.background))
-    };
-    state.history.push(fullState);
-    if (state.history.length > 50) state.history.shift();
-}
-
-// Модифицируем saveState для работы с фоном
-const originalSaveState = saveState;
-saveState = function() {
-    const fullState = {
-        paths: state.paths,
-        background: JSON.parse(JSON.stringify(state.background))
-    };
-    state.history.push(fullState);
-    if (state.history.length > 50) state.history.shift();
-};
-
-// Модифицируем undo для восстановления фона
-const originalUndo = undo;
-undo = function() {
-    if (state.history.length > 1) {
-        state.history.pop();
-        const lastState = state.history[state.history.length - 1];
-        state.paths = JSON.parse(JSON.stringify(lastState.paths));
-        state.background = JSON.parse(JSON.stringify(lastState.background));
-        
-        // Обновляем UI
-        if (bgType) bgType.value = state.background.type;
-        if (bgColor) bgColor.value = state.background.solidColor;
-        if (bgColorPreview) bgColorPreview.style.background = state.background.solidColor;
-        if (gradientColor1) gradientColor1.value = state.background.gradient.color1;
-        if (gradientColor2) gradientColor2.value = state.background.gradient.color2;
-        if (gradientType) gradientType.value = state.background.gradient.type;
-        if (gradientAngle) gradientAngle.value = state.background.gradient.angle;
-        if (angleVal) angleVal.textContent = `${state.background.gradient.angle}°`;
-        
-        solidBgControl.style.display = state.background.type === 'solid' ? 'block' : 'none';
-        gradientBgControl.style.display = state.background.type === 'gradient' ? 'block' : 'none';
-        
-        state.selectedPathIdx = -1;
-        state.showHandles = false;
-        draw();
-    }
-};
-
-// Модифицируем clearCanvas для сброса фона
-const originalClearCanvas = clearCanvas;
-clearCanvas = function() {
-    state.paths = [];
-    state.background = {
-        type: 'none',
-        solidColor: '#ffffff',
-        gradient: {
-            type: 'linear',
-            color1: '#3b82f6',
-            color2: '#8b5cf6',
-            angle: 90
-        }
-    };
-    state.history = [{
-        paths: [],
-        background: JSON.parse(JSON.stringify(state.background))
-    }];
-    state.selectedPathIdx = -1;
-    state.showHandles = false;
-    
-    // Обновляем UI
-    if (bgType) bgType.value = 'none';
-    solidBgControl.style.display = 'none';
-    gradientBgControl.style.display = 'none';
-    
-    draw();
-};
 
 
 // Запуск
