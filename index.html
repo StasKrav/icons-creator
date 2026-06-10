@@ -745,8 +745,26 @@
                         <div class="checkbox-group">
                             <label><input type="checkbox" id="snap" checked> Привязка к сетке</label>
                         </div>
+
+                        <!-- В panel-section с сеткой -->
                         <div class="property-row">
-                            <label>Размер сетки</label>
+                            <label>Режим сетки</label>
+                            <select id="gridMode">
+                                <option value="square">Квадратная</option>
+                                <option value="triangular">Треугольная</option>
+                            </select>
+                        </div>
+                        
+                        <div class="property-row" id="triSizeRow" style="display: none;">
+                            <label>Размер</label>
+                            <div class="thickness-control">
+                                <span class="thickness-value" id="triSizeVal">32</span>
+                                <input type="range" id="triGridSize" min="16" max="64" value="32" step="4">
+                            </div>
+                        </div>
+                        
+                        <div class="property-row">
+                            <label>Шаг сетки</label>
                             <select id="gridSize">
                                 <option value="8">8 px</option>
                                 <option value="16">16 px</option>
@@ -847,6 +865,8 @@ let state = {
     thickness: 3,
     snap: true,
     gridSize: 32,
+    gridMode: 'square', // 'square', 'triangular', 'dots'
+    triGridSize: 32,
     showHandles: false,
     lastCreatedCurveIdx: -1,
     background: {
@@ -991,6 +1011,12 @@ function updatePanelFromSelected() {
 // Snap к сетке
 function snapXY(x, y) {
     if (!state.snap) return {x, y};
+    
+    if (state.gridMode === 'triangular' || state.gridMode === 'dots') {
+        return snapToTriangular(x, y);
+    }
+    
+    // Квадратная сетка
     return {
         x: Math.round(x / state.gridSize) * state.gridSize,
         y: Math.round(y / state.gridSize) * state.gridSize
@@ -1002,7 +1028,13 @@ function getMousePos(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    return snapXY((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+    const rawX = (e.clientX - rect.left) * scaleX;
+    const rawY = (e.clientY - rect.top) * scaleY;
+    
+    if (state.gridMode === 'triangular') {
+        return snapToTriangular(rawX, rawY);
+    }
+    return snapXY(rawX, rawY);
 }
 
 // Обработчики мыши
@@ -1824,22 +1856,98 @@ function drawHandles(ctx, path, idx) {
     }
 }
 
+// Отрисовка треугольной сетки
+function drawTriangularGrid() {
+    const w = canvas.width;
+    const h = canvas.height;
+    const side = state.triGridSize;  // Длина стороны треугольника
+    const height = side * Math.sqrt(3) / 2;  // Высота треугольника
+    
+    ctx.save();
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 0.8;
+    
+    // Рисуем горизонтальные линии
+    for (let y = 0; y <= h + height; y += height) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+    }
+    
+    // Рисуем наклонные линии
+    for (let row = 0; row <= h / height + 1; row++) {
+        const y = row * height;
+        const offsetX = (row % 2 === 0) ? 0 : side / 2;
+        
+        // Линии вправо-вверх (\)
+        for (let x = offsetX; x <= w + side; x += side) {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + side / 2, y - height);
+            ctx.stroke();
+        }
+        
+        // Линии влево-вверх (/)
+        for (let x = offsetX; x <= w + side; x += side) {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x - side / 2, y - height);
+            ctx.stroke();
+        }
+    }
+    
+    ctx.restore();
+}
+
+// Привязка к треугольной сетке
+function snapToTriangular(x, y) {
+    const side = state.triGridSize;
+    const height = side * Math.sqrt(3) / 2;
+    
+    // Находим ближайший узел треугольной сетки
+    const row = Math.round(y / height);
+    const col = Math.round(x / side);
+    
+    // Смещение для чётных/нечётных рядов
+    const offsetX = (row % 2 === 0) ? 0 : side / 2;
+    
+    let snapX = col * side + offsetX;
+    let snapY = row * height;
+    
+    return {x: snapX, y: snapY};
+}
+
+
 function drawGrid() {
     if (!state.snap) return;
     
-    ctx.strokeStyle = '#e8e8e8';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= canvas.width; i += state.gridSize) {
-        ctx.beginPath(); 
-        ctx.moveTo(i, 0); 
-        ctx.lineTo(i, canvas.height); 
-        ctx.stroke();
+    if (state.gridMode === 'square') {
+        // Обычная квадратная сетка
+        ctx.save();
+        ctx.strokeStyle = '#e8e8e8';
+        ctx.lineWidth = 1;
+        
+        for (let i = 0; i <= canvas.width; i += state.gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, canvas.height);
+            ctx.stroke();
+        }
+        for (let i = 0; i <= canvas.height; i += state.gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, i);
+            ctx.lineTo(canvas.width, i);
+            ctx.stroke();
+        }
+        ctx.restore();
+        
+    } else if (state.gridMode === 'triangular') {
+        drawTriangularGrid();
+        
     }
-    for (let i = 0; i <= canvas.height; i += state.gridSize) {
-        ctx.beginPath(); 
-        ctx.moveTo(0, i); 
-        ctx.lineTo(canvas.width, i); 
-        ctx.stroke();
+     else if (state.gridMode === 'dots') {
+        drawDotGrid();
     }
 }
 
@@ -2977,6 +3085,39 @@ function downloadBlob(blob, filename) {
     URL.revokeObjectURL(url);
 }
 
+// Обработчики новой сетки
+const gridModeSelect = document.getElementById('gridMode');
+const triSizeRow = document.getElementById('triSizeRow');
+const triGridSizeInput = document.getElementById('triGridSize');
+const triSizeVal = document.getElementById('triSizeVal');
+
+if (gridModeSelect) {
+    gridModeSelect.onchange = (e) => {
+        state.gridMode = e.target.value;
+        
+        // Показываем/скрываем ползунок размера для треугольной сетки
+        if (triSizeRow) {
+            triSizeRow.style.display = state.gridMode === 'triangular' ? 'flex' : 'none';
+        }
+        
+        // В режиме точек тоже используем размер, но показываем по-другому
+        if (triSizeRow && state.gridMode === 'dots') {
+            triSizeRow.style.display = 'flex';
+            const label = triSizeRow.querySelector('label');
+            if (label) label.textContent = 'Шаг точек';
+        }
+        
+        draw();
+    };
+}
+
+if (triGridSizeInput) {
+    triGridSizeInput.oninput = (e) => {
+        state.triGridSize = +e.target.value;
+        if (triSizeVal) triSizeVal.textContent = state.triGridSize;
+        draw();
+    };
+}
 
 
 // Назначаем обработчики
