@@ -763,7 +763,7 @@
                             </div>
                         </div>
                         
-                        <div class="property-row">
+                        <div class="property-row" id="squareSizeRow">
                             <label>Шаг сетки</label>
                             <select id="gridSize">
                                 <option value="8">8 px</option>
@@ -772,6 +772,7 @@
                                 <option value="32" selected>32 px</option>
                             </select>
                         </div>
+                    
                     </div>
                 </div>
     
@@ -1012,7 +1013,7 @@ function updatePanelFromSelected() {
 function snapXY(x, y) {
     if (!state.snap) return {x, y};
     
-    if (state.gridMode === 'triangular' || state.gridMode === 'dots') {
+    if (state.gridMode === 'triangular') {
         return snapToTriangular(x, y);
     }
     
@@ -1923,7 +1924,6 @@ function drawGrid() {
     if (!state.snap) return;
     
     if (state.gridMode === 'square') {
-        // Обычная квадратная сетка
         ctx.save();
         ctx.strokeStyle = '#e8e8e8';
         ctx.lineWidth = 1;
@@ -1944,10 +1944,6 @@ function drawGrid() {
         
     } else if (state.gridMode === 'triangular') {
         drawTriangularGrid();
-        
-    }
-     else if (state.gridMode === 'dots') {
-        drawDotGrid();
     }
 }
 
@@ -3085,32 +3081,34 @@ function downloadBlob(blob, filename) {
     URL.revokeObjectURL(url);
 }
 
-// Обработчики новой сетки
+// ========== УПРАВЛЕНИЕ СЕТКОЙ ==========
 const gridModeSelect = document.getElementById('gridMode');
+const squareSizeRow = document.getElementById('squareSizeRow');
 const triSizeRow = document.getElementById('triSizeRow');
 const triGridSizeInput = document.getElementById('triGridSize');
 const triSizeVal = document.getElementById('triSizeVal');
 
+// Функция обновления видимости
+function updateGridUI() {
+    if (state.gridMode === 'square') {
+        if (squareSizeRow) squareSizeRow.style.display = 'flex';
+        if (triSizeRow) triSizeRow.style.display = 'none';
+    } else if (state.gridMode === 'triangular') {
+        if (squareSizeRow) squareSizeRow.style.display = 'none';
+        if (triSizeRow) triSizeRow.style.display = 'flex';
+    }
+}
+
+// Обработчик смены режима
 if (gridModeSelect) {
     gridModeSelect.onchange = (e) => {
         state.gridMode = e.target.value;
-        
-        // Показываем/скрываем ползунок размера для треугольной сетки
-        if (triSizeRow) {
-            triSizeRow.style.display = state.gridMode === 'triangular' ? 'flex' : 'none';
-        }
-        
-        // В режиме точек тоже используем размер, но показываем по-другому
-        if (triSizeRow && state.gridMode === 'dots') {
-            triSizeRow.style.display = 'flex';
-            const label = triSizeRow.querySelector('label');
-            if (label) label.textContent = 'Шаг точек';
-        }
-        
+        updateGridUI();
         draw();
     };
 }
 
+// Обработчик ползунка размера треугольника
 if (triGridSizeInput) {
     triGridSizeInput.oninput = (e) => {
         state.triGridSize = +e.target.value;
@@ -3118,6 +3116,9 @@ if (triGridSizeInput) {
         draw();
     };
 }
+
+// Инициализация
+updateGridUI();
 
 
 // Назначаем обработчики
