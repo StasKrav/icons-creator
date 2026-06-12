@@ -917,6 +917,7 @@ let state = {
     triGridSize: 32,
     showHandles: false,
     lastCreatedCurveIdx: -1,
+    ghostStroke: true, 
     // НОВЫЕ ПОЛЯ ДЛЯ ЗАЛИВКИ
         fillType: 'none',      // 'none', 'solid', 'gradient'
         fillColor: '#3b82f6',
@@ -1084,6 +1085,8 @@ function updatePanelFromSelected() {
             fillGradientAngle.value = state.fillGradient.angle;
             if (fillAngleVal) fillAngleVal.textContent = `${state.fillGradient.angle}°`;
         }
+
+        draw();
     }
 }
 
@@ -1349,7 +1352,6 @@ function onMouseUp(e) {
                 thickness: state.thickness,
                 color: state.color
             };
-        // В функции onMouseUp, в блоке создания кривой:
         } else if (state.tool === 'curve') {
             const start = state.currentPath[0];
             const end = pos;
@@ -1402,6 +1404,10 @@ function onMouseUp(e) {
             state.selectedPathIdx = state.paths.length - 1;
             updatePanelFromSelected();
             saveState();
+            
+            // Принудительная перерисовка с очисткой
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            draw();
         }
     }
     
@@ -1619,6 +1625,53 @@ function eraseAt(x, y) {
     draw();
 }
 
+// Проверка, имеет ли фигура видимое представление (заливка или контур)
+function hasVisibleAppearance(path) {
+    const fillType = path.fillType !== undefined ? path.fillType : state.fillType;
+    const thickness = path.thickness !== undefined ? path.thickness : state.thickness;
+    
+    const hasFill = fillType !== 'none';
+    const hasStroke = thickness > 0;
+    
+    return hasFill || hasStroke;
+}
+
+// Отрисовка временного контура для невидимых фигур
+function drawGhostOutline(ctx, path) {
+    console.log('Рисуем призрачный контур для:', path.tool, 'с точками:', path.points);
+    
+    ctx.save();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    
+    if (path.tool === 'rectangle' && path.points.length === 4) {
+        console.log('Рисуем прямоугольник:', path.points);
+        ctx.moveTo(path.points[0].x, path.points[0].y);
+        for (let i = 1; i < 4; i++) {
+            ctx.lineTo(path.points[i].x, path.points[i].y);
+        }
+        ctx.closePath();
+    } else if (path.tool === 'circle' && path.points.length === 2) {
+        const center = path.points[0];
+        const radiusPoint = path.points[1];
+        const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+        console.log('Рисуем круг:', center, radius);
+        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    } else {
+        console.log('Неизвестная фигура или не поддерживается:', path.tool);
+        ctx.restore();
+        return;
+    }
+    
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+}
+
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -1757,6 +1810,7 @@ function draw() {
             ctx.restore();
         }
     });
+
     
     // ========== ПОДСВЕТКА ВЫДЕЛЕННОГО ПУТИ (поверх всего) ==========
     if (state.tool === 'select') {
@@ -1853,6 +1907,33 @@ function draw() {
             });
         }
     });
+
+    // ========== ПРИЗРАЧНЫЕ КОНТУРЫ ДЛЯ НЕВИДИМЫХ ФИГУР ==========
+    if (state.ghostStroke !== false) {
+        state.paths.forEach((path, idx) => {
+            // Не показываем призрачный контур для выделенной фигуры
+            if (idx === state.selectedPathIdx) return;
+            
+            // Проверяем видимость
+            const isVisible = hasVisibleAppearance(path);
+            
+            // ОТЛАДКА - удалить после исправления
+            if (path.tool === 'rectangle' && idx === state.paths.length - 1) {
+                console.log('Новая фигура:', {
+                    idx,
+                    fillType: path.fillType,
+                    thickness: path.thickness,
+                    isVisible: isVisible,
+                    willDrawGhost: !isVisible
+                });
+            }
+            
+            if (!isVisible) {
+                drawGhostOutline(ctx, path);
+            }
+        });
+    }
+    
 }
 
 function drawPath(ctx, path, forExport = false) {
