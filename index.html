@@ -684,7 +684,7 @@
                             <label>Толщина</label>
                             <div class="thickness-control">
                                 <span class="thickness-value" id="thickVal">3</span>
-                                <input type="range" id="thickness" min="1" max="20" value="3">
+                                <input type="range" id="thickness" min="0" max="20" value="3">
                             </div>
                         </div>
                     </div>
@@ -1632,7 +1632,6 @@ function draw() {
             let gradient;
             
             if (grad.type === 'linear') {
-                // Линейный градиент
                 const angleRad = (grad.angle * Math.PI) / 180;
                 const x1 = canvas.width / 2 - Math.cos(angleRad) * canvas.width / 2;
                 const y1 = canvas.height / 2 - Math.sin(angleRad) * canvas.height / 2;
@@ -1640,7 +1639,6 @@ function draw() {
                 const y2 = canvas.height / 2 + Math.sin(angleRad) * canvas.height / 2;
                 gradient = ctx.createLinearGradient(x1, y1, x2, y2);
             } else {
-                // Радиальный градиент
                 gradient = ctx.createRadialGradient(
                     canvas.width / 2, canvas.height / 2, 0,
                     canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) / 2
@@ -1656,32 +1654,157 @@ function draw() {
     
     drawGrid();
     
+    // ========== СНАЧАЛА РИСУЕМ ВСЕ ЗАЛИВКИ ==========
     state.paths.forEach((path, idx) => {
-        const pathThickness = path.thickness || state.thickness;
+        const fillType = path.fillType || state.fillType;
+        
+        // Рисуем заливку, если она есть
+        if (fillType !== 'none') {
+            ctx.save();
+            
+            if (fillType === 'solid') {
+                const fillColor = path.fillColor || state.fillColor;
+                ctx.fillStyle = fillColor;
+            } else if (fillType === 'gradient') {
+                const fillGradient = path.fillGradient || state.fillGradient;
+                let gradient;
+                const bounds = getPathBounds(path);
+                
+                if (fillGradient.type === 'linear') {
+                    const angleRad = (fillGradient.angle * Math.PI) / 180;
+                    const centerX = (bounds.minX + bounds.maxX) / 2;
+                    const centerY = (bounds.minY + bounds.maxY) / 2;
+                    const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+                    
+                    const x1 = centerX - Math.cos(angleRad) * radius;
+                    const y1 = centerY - Math.sin(angleRad) * radius;
+                    const x2 = centerX + Math.cos(angleRad) * radius;
+                    const y2 = centerY + Math.sin(angleRad) * radius;
+                    gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+                } else {
+                    const centerX = (bounds.minX + bounds.maxX) / 2;
+                    const centerY = (bounds.minY + bounds.maxY) / 2;
+                    const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+                    gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+                }
+                
+                gradient.addColorStop(0, fillGradient.color1);
+                gradient.addColorStop(1, fillGradient.color2);
+                ctx.fillStyle = gradient;
+            }
+            
+            ctx.beginPath();
+            
+            if (path.tool === 'rectangle' && path.points.length === 4) {
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                for (let i = 1; i < 4; i++) {
+                    ctx.lineTo(path.points[i].x, path.points[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+            } else if (path.tool === 'circle' && path.points.length === 2) {
+                const center = path.points[0];
+                const radiusPoint = path.points[1];
+                const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+                ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+    });
+    
+    // ========== ЗАТЕМ РИСУЕМ ВСЕ ОБВОДКИ (только если толщина > 0) ==========
+    state.paths.forEach((path, idx) => {
+        const pathThickness = path.thickness !== undefined ? path.thickness : state.thickness;
         const pathColor = path.color || state.color;
         
-        // 1. Рисуем подсветку выделенного пути
-        if (state.tool === 'select' && idx === state.selectedPathIdx) {
-            ctx.strokeStyle = 'rgba(66, 133, 244, 0.4)';
-            ctx.lineWidth = pathThickness + 8;
+        if (pathThickness > 0) {
+            ctx.save();
+            ctx.strokeStyle = pathColor;
+            ctx.lineWidth = pathThickness;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.beginPath();
-            drawPath(ctx, path);
+            
+            if (path.tool === 'curve' && path.points.length === 4) {
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                ctx.bezierCurveTo(
+                    path.points[1].x, path.points[1].y,
+                    path.points[2].x, path.points[2].y,
+                    path.points[3].x, path.points[3].y
+                );
+            } else if (path.tool === 'curve' && path.points.length === 3) {
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                ctx.quadraticCurveTo(path.points[1].x, path.points[1].y, path.points[2].x, path.points[2].y);
+            } else if (path.tool === 'line' && path.points.length === 2) {
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                ctx.lineTo(path.points[1].x, path.points[1].y);
+            } else if (path.tool === 'rectangle' && path.points.length === 4) {
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                for (let i = 1; i < 4; i++) {
+                    ctx.lineTo(path.points[i].x, path.points[i].y);
+                }
+                ctx.closePath();
+            } else if (path.tool === 'circle' && path.points.length === 2) {
+                const center = path.points[0];
+                const radiusPoint = path.points[1];
+                const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+                ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+            }
+            
             ctx.stroke();
+            ctx.restore();
         }
-        
-        // 2. Рисуем сам путь
-        ctx.strokeStyle = pathColor;
-        ctx.lineWidth = pathThickness;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        drawPath(ctx, path);
-        ctx.stroke();
     });
     
-    // 3. РИСУЕМ РУЧКИ И ТОЧКИ (отдельный цикл, после всех линий)
+    // ========== ПОДСВЕТКА ВЫДЕЛЕННОГО ПУТИ (поверх всего) ==========
+    if (state.tool === 'select') {
+        state.paths.forEach((path, idx) => {
+            if (idx === state.selectedPathIdx) {
+                const pathThickness = path.thickness !== undefined ? path.thickness : state.thickness;
+                const glowWidth = pathThickness > 0 ? pathThickness + 8 : 6;
+                
+                ctx.save();
+                ctx.strokeStyle = 'rgba(66, 133, 244, 0.5)';
+                ctx.lineWidth = glowWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                
+                if (path.tool === 'curve' && path.points.length === 4) {
+                    ctx.moveTo(path.points[0].x, path.points[0].y);
+                    ctx.bezierCurveTo(
+                        path.points[1].x, path.points[1].y,
+                        path.points[2].x, path.points[2].y,
+                        path.points[3].x, path.points[3].y
+                    );
+                } else if (path.tool === 'curve' && path.points.length === 3) {
+                    ctx.moveTo(path.points[0].x, path.points[0].y);
+                    ctx.quadraticCurveTo(path.points[1].x, path.points[1].y, path.points[2].x, path.points[2].y);
+                } else if (path.tool === 'line' && path.points.length === 2) {
+                    ctx.moveTo(path.points[0].x, path.points[0].y);
+                    ctx.lineTo(path.points[1].x, path.points[1].y);
+                } else if (path.tool === 'rectangle' && path.points.length === 4) {
+                    ctx.moveTo(path.points[0].x, path.points[0].y);
+                    for (let i = 1; i < 4; i++) {
+                        ctx.lineTo(path.points[i].x, path.points[i].y);
+                    }
+                    ctx.closePath();
+                } else if (path.tool === 'circle' && path.points.length === 2) {
+                    const center = path.points[0];
+                    const radiusPoint = path.points[1];
+                    const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+                    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+                }
+                
+                ctx.stroke();
+                ctx.restore();
+            }
+        });
+    }
+    
+    // ========== РУЧКИ И ТОЧКИ (оставляем как было) ==========
     state.paths.forEach((path, idx) => {
         const shouldShowHandles = ((state.tool === 'curve' || state.tool === 'select') && 
                                    (idx === state.selectedPathIdx || idx === state.hoveredPathIdx) && 
@@ -1689,10 +1812,8 @@ function draw() {
         
         if (shouldShowHandles) {
             if (path.tool === 'curve' && path.points.length === 4) {
-                // Новая кривая с двумя ручками
                 drawHandles(ctx, path, idx);
             } else if (path.tool === 'curve' && path.points.length === 3) {
-                // Старая квадратичная кривая
                 const handle = path.points[1];
                 const isDraggingThisHandle = state.isDragging && 
                                              state.dragType === 'handle' && 
@@ -1717,7 +1838,7 @@ function draw() {
         }
     });
     
-    // 4. ТОЧКИ ДЛЯ ВЫБРАННОГО ПУТИ (синие точки, НЕ жёлтые)
+    // ТОЧКИ ДЛЯ ВЫБРАННОГО ПУТИ
     state.paths.forEach((path, idx) => {
         if (state.tool === 'select' && idx === state.selectedPathIdx) {
             ctx.fillStyle = 'rgba(66, 133, 244, 0.9)';
@@ -1735,12 +1856,14 @@ function draw() {
 }
 
 function drawPath(ctx, path, forExport = false) {
-    // Получаем параметры заливки из пути или глобальные
     const fillType = path.fillType || state.fillType;
     const fillColor = path.fillColor || state.fillColor;
     const fillGradient = path.fillGradient || state.fillGradient;
     
-    // Сначала рисуем заливку (если есть)
+    const pathColor = path.color || state.color;
+    const pathThickness = path.thickness !== undefined ? path.thickness : state.thickness;
+    
+    // ========== РИСУЕМ ЗАЛИВКУ ==========
     if (fillType !== 'none') {
         ctx.save();
         
@@ -1773,7 +1896,6 @@ function drawPath(ctx, path, forExport = false) {
             ctx.fillStyle = gradient;
         }
         
-        // Рисуем залитую фигуру
         ctx.beginPath();
         
         if (path.tool === 'rectangle' && path.points.length === 4) {
@@ -1790,53 +1912,47 @@ function drawPath(ctx, path, forExport = false) {
             const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
             ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
             ctx.fill();
-            
-        } else if (path.tool === 'curve' && path.points.length === 4 && fillType !== 'none') {
-            // Для кривых нужен замкнутый контур
+        }
+        
+        ctx.restore();
+    }
+    
+    // ========== РИСУЕМ ОБВОДКУ (только если толщина > 0) ==========
+    if (pathThickness > 0) {
+        ctx.beginPath();
+        ctx.strokeStyle = pathColor;
+        ctx.lineWidth = pathThickness;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        if (path.tool === 'curve' && path.points.length === 4) {
             ctx.moveTo(path.points[0].x, path.points[0].y);
             ctx.bezierCurveTo(
                 path.points[1].x, path.points[1].y,
                 path.points[2].x, path.points[2].y,
                 path.points[3].x, path.points[3].y
             );
-            // Замыкаем кривую
-            ctx.lineTo(path.points[0].x, path.points[0].y);
-            ctx.fill();
+        } else if (path.tool === 'curve' && path.points.length === 3) {
+            ctx.moveTo(path.points[0].x, path.points[0].y);
+            ctx.quadraticCurveTo(path.points[1].x, path.points[1].y, path.points[2].x, path.points[2].y);
+        } else if (path.tool === 'line' && path.points.length === 2) {
+            ctx.moveTo(path.points[0].x, path.points[0].y);
+            ctx.lineTo(path.points[1].x, path.points[1].y);
+        } else if (path.tool === 'rectangle' && path.points.length === 4) {
+            ctx.moveTo(path.points[0].x, path.points[0].y);
+            for (let i = 1; i < 4; i++) {
+                ctx.lineTo(path.points[i].x, path.points[i].y);
+            }
+            ctx.closePath();
+        } else if (path.tool === 'circle' && path.points.length === 2) {
+            const center = path.points[0];
+            const radiusPoint = path.points[1];
+            const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+            ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
         }
         
-        ctx.restore();
+        ctx.stroke();
     }
-    
-    // Затем рисуем обводку
-    ctx.beginPath();
-    
-    if (path.tool === 'curve' && path.points.length === 4) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        ctx.bezierCurveTo(
-            path.points[1].x, path.points[1].y,
-            path.points[2].x, path.points[2].y,
-            path.points[3].x, path.points[3].y
-        );
-    } else if (path.tool === 'curve' && path.points.length === 3) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        ctx.quadraticCurveTo(path.points[1].x, path.points[1].y, path.points[2].x, path.points[2].y);
-    } else if (path.tool === 'line' && path.points.length === 2) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        ctx.lineTo(path.points[1].x, path.points[1].y);
-    } else if (path.tool === 'rectangle' && path.points.length === 4) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < 4; i++) {
-            ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
-        ctx.closePath();
-    } else if (path.tool === 'circle' && path.points.length === 2) {
-        const center = path.points[0];
-        const radiusPoint = path.points[1];
-        const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
-        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-    }
-    
-    ctx.stroke();
 }
 
 // Вспомогательная функция для получения границ пути
@@ -2282,7 +2398,6 @@ function exportSVG() {
             maxY = Math.max(maxY, center.y + radius + lineOffset);
         }
         
-        // Для кривых Безье с 4 точками нужно учитывать ручки
         if (path.tool === 'curve' && path.points.length === 4) {
             const handle1 = path.points[1];
             const handle2 = path.points[2];
@@ -2318,51 +2433,93 @@ function exportSVG() {
     const offsetY = -minY;
     
     let paths = '';
-    state.paths.forEach(path => {
+    let gradientsDefs = '';
+    let gradientCounter = 0;
+    
+    state.paths.forEach((path, idx) => {
         const pathThickness = path.thickness || state.thickness;
         const pathColor = path.color || state.color;
         
+        // Получаем параметры заливки
+        const fillType = (path.tool === 'rectangle' || path.tool === 'circle') 
+            ? (path.fillType || state.fillType) 
+            : 'none';
+        const fillColor = path.fillColor || state.fillColor;
+        const fillGradient = path.fillGradient || state.fillGradient;
+        
+        // Для градиента создаём defs
+        let fillAttr = 'fill="none"';
+        if (fillType === 'solid') {
+            fillAttr = `fill="${fillColor}"`;
+        } else if (fillType === 'gradient') {
+            const gradId = `grad${gradientCounter++}`;
+            fillAttr = `fill="url(#${gradId})"`;
+            
+            // Определяем градиент
+            let gradientDef = '';
+            if (fillGradient.type === 'linear') {
+                gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">`;
+                if (fillGradient.angle === 90) {
+                    gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">`;
+                } else if (fillGradient.angle === 180) {
+                    gradientDef = `<linearGradient id="${gradId}" x1="100%" y1="0%" x2="0%" y2="0%">`;
+                } else if (fillGradient.angle === 270) {
+                    gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="100%" x2="0%" y2="0%">`;
+                } else {
+                    gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">`;
+                }
+                gradientDef += `<stop offset="0%" stop-color="${fillGradient.color1}"/>`;
+                gradientDef += `<stop offset="100%" stop-color="${fillGradient.color2}"/>`;
+                gradientDef += `</linearGradient>`;
+            } else {
+                gradientDef = `<radialGradient id="${gradId}" cx="50%" cy="50%" r="50%">`;
+                gradientDef += `<stop offset="0%" stop-color="${fillGradient.color1}"/>`;
+                gradientDef += `<stop offset="100%" stop-color="${fillGradient.color2}"/>`;
+                gradientDef += `</radialGradient>`;
+            }
+            gradientsDefs += gradientDef;
+        }
+        
+        // Генерация пути
         if (path.tool === 'circle' && path.points.length === 2) {
             const center = path.points[0];
             const radiusPoint = path.points[1];
             const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
             
-            paths += `<circle cx="${center.x + offsetX}" cy="${center.y + offsetY}" r="${radius}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none"/>`;
+            paths += `<circle cx="${center.x + offsetX}" cy="${center.y + offsetY}" r="${radius}" stroke="${pathColor}" stroke-width="${pathThickness}" ${fillAttr}/>\n`;
             
         } else if (path.tool === 'rectangle' && path.points.length === 4) {
             const points = path.points.map(p => 
                 `${p.x + offsetX},${p.y + offsetY}`
             ).join(' L');
             
-            paths += `<path d="M${points} Z" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+            paths += `<path d="M${points} Z" stroke="${pathColor}" stroke-width="${pathThickness}" ${fillAttr} stroke-linecap="round" stroke-linejoin="round"/>\n`;
             
         } else if (path.tool === 'line' && path.points.length === 2) {
             const points = path.points.map(p => 
                 `${p.x + offsetX},${p.y + offsetY}`
             );
-            paths += `<path d="M${points[0]} L${points[1]}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
+            paths += `<path d="M${points[0]} L${points[1]}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>\n`;
             
         } else if (path.tool === 'curve' && path.points.length === 4) {
-            // Кривая Безье с двумя ручками (кубическая)
             const p0 = path.points[0];
             const p1 = path.points[1];
             const p2 = path.points[2];
             const p3 = path.points[3];
             
-            paths += `<path d="M${p0.x + offsetX},${p0.y + offsetY} C${p1.x + offsetX},${p1.y + offsetY} ${p2.x + offsetX},${p2.y + offsetY} ${p3.x + offsetX},${p3.y + offsetY}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
+            paths += `<path d="M${p0.x + offsetX},${p0.y + offsetY} C${p1.x + offsetX},${p1.y + offsetY} ${p2.x + offsetX},${p2.y + offsetY} ${p3.x + offsetX},${p3.y + offsetY}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>\n`;
             
         } else if (path.tool === 'curve' && path.points.length === 3) {
-            // Квадратичная кривая (для обратной совместимости)
             const p0 = path.points[0];
             const p1 = path.points[1];
             const p2 = path.points[2];
             
-            paths += `<path d="M${p0.x + offsetX},${p0.y + offsetY} Q${p1.x + offsetX},${p1.y + offsetY} ${p2.x + offsetX},${p2.y + offsetY}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>`;
+            paths += `<path d="M${p0.x + offsetX},${p0.y + offsetY} Q${p1.x + offsetX},${p1.y + offsetY} ${p2.x + offsetX},${p2.y + offsetY}" stroke="${pathColor}" stroke-width="${pathThickness}" fill="none" stroke-linecap="round"/>\n`;
         }
     });
     
     const svg = `<svg width="${Math.ceil(width)}" height="${Math.ceil(height)}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-${paths}
+${gradientsDefs ? `<defs>\n${gradientsDefs}</defs>\n` : ''}${paths}
 </svg>`;
     
     download(svg, 'icon.svg');
@@ -2443,87 +2600,157 @@ function exportPNG() {
     
     tempCtx.imageSmoothingEnabled = false;
 
-    // Рисуем фон ПЕРЕД масштабированием и трансляцией
-        if (state.background.type !== 'none') {
-            if (state.background.type === 'solid') {
-                tempCtx.fillStyle = state.background.solidColor;
-                tempCtx.fillRect(0, 0, finalWidth, finalHeight);
-            } else if (state.background.type === 'gradient') {
-                const grad = state.background.gradient;
-                let gradient;
-                
-                if (grad.type === 'linear') {
-                    const angleRad = (grad.angle * Math.PI) / 180;
-                    const x1 = finalWidth / 2 - Math.cos(angleRad) * finalWidth / 2;
-                    const y1 = finalHeight / 2 - Math.sin(angleRad) * finalHeight / 2;
-                    const x2 = finalWidth / 2 + Math.cos(angleRad) * finalWidth / 2;
-                    const y2 = finalHeight / 2 + Math.sin(angleRad) * finalHeight / 2;
-                    gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
-                } else {
-                    gradient = tempCtx.createRadialGradient(
-                        finalWidth / 2, finalHeight / 2, 0,
-                        finalWidth / 2, finalHeight / 2, Math.max(finalWidth, finalHeight) / 2
-                    );
-                }
-                
-                gradient.addColorStop(0, grad.color1);
-                gradient.addColorStop(1, grad.color2);
-                tempCtx.fillStyle = gradient;
-                tempCtx.fillRect(0, 0, finalWidth, finalHeight);
+    // Рисуем фон
+    if (state.background.type !== 'none') {
+        if (state.background.type === 'solid') {
+            tempCtx.fillStyle = state.background.solidColor;
+            tempCtx.fillRect(0, 0, finalWidth, finalHeight);
+        } else if (state.background.type === 'gradient') {
+            const grad = state.background.gradient;
+            let gradient;
+            
+            if (grad.type === 'linear') {
+                const angleRad = (grad.angle * Math.PI) / 180;
+                const x1 = finalWidth / 2 - Math.cos(angleRad) * finalWidth / 2;
+                const y1 = finalHeight / 2 - Math.sin(angleRad) * finalHeight / 2;
+                const x2 = finalWidth / 2 + Math.cos(angleRad) * finalWidth / 2;
+                const y2 = finalHeight / 2 + Math.sin(angleRad) * finalHeight / 2;
+                gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
+            } else {
+                gradient = tempCtx.createRadialGradient(
+                    finalWidth / 2, finalHeight / 2, 0,
+                    finalWidth / 2, finalHeight / 2, Math.max(finalWidth, finalHeight) / 2
+                );
             }
+            
+            gradient.addColorStop(0, grad.color1);
+            gradient.addColorStop(1, grad.color2);
+            tempCtx.fillStyle = gradient;
+            tempCtx.fillRect(0, 0, finalWidth, finalHeight);
         }
+    }
     
     tempCtx.save();
     tempCtx.scale(scaleFactor, scaleFactor);
     tempCtx.translate(Math.round(offsetX), Math.round(offsetY));
     
+    // Рисуем все пути с заливкой
     state.paths.forEach(path => {
         const pathThickness = path.thickness || state.thickness;
         const pathColor = path.color || state.color;
         
+        // Получаем параметры заливки
+        const fillType = (path.tool === 'rectangle' || path.tool === 'circle') 
+            ? (path.fillType || state.fillType) 
+            : 'none';
+        const fillColor = path.fillColor || state.fillColor;
+        const fillGradient = path.fillGradient || state.fillGradient;
+        
+        // Сначала рисуем заливку
+        if (fillType !== 'none') {
+            if (fillType === 'solid') {
+                tempCtx.fillStyle = fillColor;
+            } else if (fillType === 'gradient') {
+                let gradient;
+                if (path.tool === 'circle') {
+                    const center = path.points[0];
+                    const radiusPoint = path.points[1];
+                    const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+                    gradient = tempCtx.createRadialGradient(center.x, center.y, 0, center.x, center.y, radius);
+                    gradient.addColorStop(0, fillGradient.color1);
+                    gradient.addColorStop(1, fillGradient.color2);
+                } else {
+                    const bounds = getPathBounds(path);
+                    const centerX = (bounds.minX + bounds.maxX) / 2;
+                    const centerY = (bounds.minY + bounds.maxY) / 2;
+                    const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+                    
+                    if (fillGradient.type === 'linear') {
+                        const angleRad = (fillGradient.angle * Math.PI) / 180;
+                        const x1 = centerX - Math.cos(angleRad) * radius;
+                        const y1 = centerY - Math.sin(angleRad) * radius;
+                        const x2 = centerX + Math.cos(angleRad) * radius;
+                        const y2 = centerY + Math.sin(angleRad) * radius;
+                        gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
+                    } else {
+                        gradient = tempCtx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+                    }
+                    gradient.addColorStop(0, fillGradient.color1);
+                    gradient.addColorStop(1, fillGradient.color2);
+                }
+                tempCtx.fillStyle = gradient;
+            }
+            
+            tempCtx.beginPath();
+            
+            if (path.tool === 'rectangle' && path.points.length === 4) {
+                const roundedPoints = path.points.map(p => ({
+                    x: Math.round(p.x),
+                    y: Math.round(p.y)
+                }));
+                tempCtx.moveTo(roundedPoints[0].x, roundedPoints[0].y);
+                for (let i = 1; i < 4; i++) {
+                    tempCtx.lineTo(roundedPoints[i].x, roundedPoints[i].y);
+                }
+                tempCtx.closePath();
+                tempCtx.fill();
+            } else if (path.tool === 'circle' && path.points.length === 2) {
+                const cx = Math.round(path.points[0].x);
+                const cy = Math.round(path.points[0].y);
+                const radiusPoint = path.points[1];
+                const radius = Math.hypot(radiusPoint.x - path.points[0].x, 
+                                         radiusPoint.y - path.points[0].y);
+                tempCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+                tempCtx.fill();
+            }
+        }
+        
+        // Затем рисуем обводку
+        tempCtx.beginPath();
         tempCtx.strokeStyle = pathColor;
         tempCtx.lineWidth = pathThickness;
         tempCtx.lineCap = 'round';
         tempCtx.lineJoin = 'round';
-        tempCtx.fillStyle = 'none';
-        
-        tempCtx.beginPath();
         
         if (path.tool === 'line' && path.points.length === 2) {
             const x1 = Math.round(path.points[0].x);
             const y1 = Math.round(path.points[0].y);
             const x2 = Math.round(path.points[1].x);
             const y2 = Math.round(path.points[1].y);
-            
             tempCtx.moveTo(x1, y1);
             tempCtx.lineTo(x2, y2);
-            
         } else if (path.tool === 'rectangle' && path.points.length === 4) {
             const roundedPoints = path.points.map(p => ({
                 x: Math.round(p.x),
                 y: Math.round(p.y)
             }));
-            
             tempCtx.moveTo(roundedPoints[0].x, roundedPoints[0].y);
             for (let i = 1; i < 4; i++) {
                 tempCtx.lineTo(roundedPoints[i].x, roundedPoints[i].y);
             }
             tempCtx.closePath();
-            
         } else if (path.tool === 'circle' && path.points.length === 2) {
             const cx = Math.round(path.points[0].x);
             const cy = Math.round(path.points[0].y);
             const radiusPoint = path.points[1];
             const radius = Math.hypot(radiusPoint.x - path.points[0].x, 
                                      radiusPoint.y - path.points[0].y);
-            
             tempCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-            
+        } else if (path.tool === 'curve' && path.points.length === 4) {
+            const p0 = path.points[0];
+            const p1 = path.points[1];
+            const p2 = path.points[2];
+            const p3 = path.points[3];
+            tempCtx.moveTo(Math.round(p0.x), Math.round(p0.y));
+            tempCtx.bezierCurveTo(
+                Math.round(p1.x), Math.round(p1.y),
+                Math.round(p2.x), Math.round(p2.y),
+                Math.round(p3.x), Math.round(p3.y)
+            );
         } else if (path.tool === 'curve' && path.points.length === 3) {
             const p0 = path.points[0];
             const p1 = path.points[1];
             const p2 = path.points[2];
-            
             tempCtx.moveTo(Math.round(p0.x), Math.round(p0.y));
             tempCtx.quadraticCurveTo(
                 Math.round(p1.x), Math.round(p1.y),
@@ -2588,6 +2815,7 @@ document.querySelectorAll('[data-tool]').forEach(btn => {
         state.tool = btn.dataset.tool;
         state.selectedPathIdx = -1;
         state.showHandles = (state.tool === 'curve');
+        // НЕ сбрасываем thickness и color!
         draw();
     };
 });
@@ -3227,7 +3455,6 @@ function exportPNGWithSize(size, filename) {
 }
 
 function generateSVGString() {
-    // Определяем границы
     let minX = Infinity, minY = Infinity;
     let maxX = -Infinity, maxY = -Infinity;
     
@@ -3264,17 +3491,57 @@ function generateSVGString() {
     const offsetY = -minY;
     
     let paths = '';
+    let gradientsDefs = '';
+    let gradientCounter = 0;
+    
     state.paths.forEach(path => {
         const thickness = path.thickness || state.thickness;
         const color = path.color || state.color;
         
+        const fillType = (path.tool === 'rectangle' || path.tool === 'circle') 
+            ? (path.fillType || state.fillType) 
+            : 'none';
+        const fillColor = path.fillColor || state.fillColor;
+        const fillGradient = path.fillGradient || state.fillGradient;
+        
+        let fillAttr = 'fill="none"';
+        if (fillType === 'solid') {
+            fillAttr = `fill="${fillColor}"`;
+        } else if (fillType === 'gradient') {
+            const gradId = `grad${gradientCounter++}`;
+            fillAttr = `fill="url(#${gradId})"`;
+            
+            let gradientDef = '';
+            if (fillGradient.type === 'linear') {
+                gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">`;
+                if (fillGradient.angle === 90) {
+                    gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">`;
+                } else if (fillGradient.angle === 180) {
+                    gradientDef = `<linearGradient id="${gradId}" x1="100%" y1="0%" x2="0%" y2="0%">`;
+                } else if (fillGradient.angle === 270) {
+                    gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="100%" x2="0%" y2="0%">`;
+                } else {
+                    gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">`;
+                }
+                gradientDef += `<stop offset="0%" stop-color="${fillGradient.color1}"/>`;
+                gradientDef += `<stop offset="100%" stop-color="${fillGradient.color2}"/>`;
+                gradientDef += `</linearGradient>`;
+            } else {
+                gradientDef = `<radialGradient id="${gradId}" cx="50%" cy="50%" r="50%">`;
+                gradientDef += `<stop offset="0%" stop-color="${fillGradient.color1}"/>`;
+                gradientDef += `<stop offset="100%" stop-color="${fillGradient.color2}"/>`;
+                gradientDef += `</radialGradient>`;
+            }
+            gradientsDefs += gradientDef;
+        }
+        
         if (path.tool === 'circle') {
             const center = path.points[0];
             const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
-            paths += `<circle cx="${center.x + offsetX}" cy="${center.y + offsetY}" r="${radius}" stroke="${color}" stroke-width="${thickness}" fill="none" stroke-linecap="round"/>\n`;
+            paths += `<circle cx="${center.x + offsetX}" cy="${center.y + offsetY}" r="${radius}" stroke="${color}" stroke-width="${thickness}" ${fillAttr} stroke-linecap="round"/>\n`;
         } else if (path.tool === 'rectangle') {
             const pts = path.points.map(p => `${p.x + offsetX},${p.y + offsetY}`).join(' L');
-            paths += `<path d="M${pts} Z" stroke="${color}" stroke-width="${thickness}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>\n`;
+            paths += `<path d="M${pts} Z" stroke="${color}" stroke-width="${thickness}" ${fillAttr} stroke-linecap="round" stroke-linejoin="round"/>\n`;
         } else if (path.tool === 'line') {
             paths += `<line x1="${path.points[0].x + offsetX}" y1="${path.points[0].y + offsetY}" x2="${path.points[1].x + offsetX}" y2="${path.points[1].y + offsetY}" stroke="${color}" stroke-width="${thickness}" stroke-linecap="round"/>\n`;
         } else if (path.tool === 'curve') {
@@ -3283,7 +3550,8 @@ function generateSVGString() {
         }
     });
     
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}">\n${paths}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}">
+${gradientsDefs ? `<defs>\n${gradientsDefs}</defs>\n` : ''}${paths}</svg>`;
 }
 
 // Функция экспорта PNG с конкретным размером (используется в ZIP экспорте)
