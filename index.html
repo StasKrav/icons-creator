@@ -1490,18 +1490,84 @@ function findPoint(x, y) {
 }
 
 function findPathAt(x, y) {
-    if (state.selectedPathIdx !== -1) {
-        if (isPointNearPath(x, y, state.paths[state.selectedPathIdx])) {
-            return state.selectedPathIdx;
-        }
-    }
-    
+    // Идём с конца (чтобы выбирать верхние фигуры)
     for (let i = state.paths.length - 1; i >= 0; i--) {
-        if (isPointNearPath(x, y, state.paths[i])) {
+        const path = state.paths[i];
+        if (isPointOnPath(x, y, path)) {
             return i;
         }
     }
     return -1;
+}
+
+function isPointOnPath(x, y, path) {
+    const thickness = path.thickness !== undefined ? path.thickness : state.thickness;
+    // Размер "зоны захвата" - чуть больше толщины линии
+    const hitMargin = Math.max(8, thickness + 5);
+    
+    if (path.tool === 'rectangle' && path.points.length === 4) {
+        // Находим границы прямоугольника
+        const xs = path.points.map(p => p.x);
+        const ys = path.points.map(p => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        
+        // Проверяем, внутри ли курсор (с учётом запаса)
+        if (x >= minX - hitMargin && x <= maxX + hitMargin &&
+            y >= minY - hitMargin && y <= maxY + hitMargin) {
+            return true;
+        }
+        
+    } else if (path.tool === 'circle' && path.points.length === 2) {
+        const center = path.points[0];
+        const radiusPoint = path.points[1];
+        const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+        const dist = Math.hypot(x - center.x, y - center.y);
+        
+        // Проверяем, рядом ли с окружностью
+        if (Math.abs(dist - radius) <= hitMargin) {
+            return true;
+        }
+        // Или внутри круга (для залитых фигур)
+        const hasFill = path.fillType !== 'none';
+        if (hasFill && dist <= radius + hitMargin) {
+            return true;
+        }
+        
+    } else if (path.tool === 'line' && path.points.length === 2) {
+        const dist = distanceToLine(x, y, path.points[0], path.points[1]);
+        if (dist <= hitMargin) {
+            // Дополнительно проверяем, что точка проекции между концами линии
+            const dot1 = (x - path.points[0].x) * (path.points[1].x - path.points[0].x) +
+                        (y - path.points[0].y) * (path.points[1].y - path.points[0].y);
+            const dot2 = (x - path.points[1].x) * (path.points[0].x - path.points[1].x) +
+                        (y - path.points[1].y) * (path.points[0].y - path.points[1].y);
+            if (dot1 >= -hitMargin && dot2 >= -hitMargin) {
+                return true;
+            }
+        }
+        
+    } else if (path.tool === 'curve' && path.points.length === 4) {
+        // Проверяем близость к кривой
+        for (let t = 0; t <= 1; t += 0.05) {
+            const t1 = 1 - t;
+            const px = t1 * t1 * t1 * path.points[0].x + 
+                       3 * t1 * t1 * t * path.points[1].x + 
+                       3 * t1 * t * t * path.points[2].x + 
+                       t * t * t * path.points[3].x;
+            const py = t1 * t1 * t1 * path.points[0].y + 
+                       3 * t1 * t1 * t * path.points[1].y + 
+                       3 * t1 * t * t * path.points[2].y + 
+                       t * t * t * path.points[3].y;
+            if (Math.hypot(px - x, py - y) <= hitMargin) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
 }
 
 function isPointNearPath(x, y, path) {
