@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><rect width='24' height='24' rx='4'/></svg>">
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
     <title>Редактор Иконок — Векторный редактор</title>
     <style>
         * {
@@ -689,6 +689,53 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="panel-section">
+                    <h3>Заливка</h3>
+                    <div class="property-group">
+                        <div class="property-row">
+                            <label>Тип</label>
+                            <select id="fillType" style="flex: 1;">
+                                <option value="none">Без заливки</option>
+                                <option value="solid">Сплошная</option>
+                                <option value="gradient">Градиент</option>
+                            </select>
+                        </div>
+                        
+                        <div id="solidFillControl" style="display: none;">
+                            <div class="property-row">
+                                <label>Цвет</label>
+                                <div class="color-preview" id="fillColorPreview" style="background: #3b82f6; width: 40px; height: 40px;" onclick="document.getElementById('fillColor').click()"></div>
+                                <input type="color" id="fillColor" value="#3b82f6" style="position: absolute; opacity: 0;">
+                            </div>
+                        </div>
+                        
+                        <div id="gradientFillControl" style="display: none;">
+                            <div class="property-row">
+                                <label>Тип градиента</label>
+                                <select id="fillGradientType" style="flex: 1;">
+                                    <option value="linear">Линейный</option>
+                                    <option value="radial">Радиальный</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Цвет 1</label>
+                                <div class="color-preview" id="fillGradientColor1Preview" style="background: #3b82f6; width: 40px; height: 40px; cursor: pointer;"></div>
+                                <input type="color" id="fillGradientColor1" value="#3b82f6" style="position: absolute; opacity: 0;">
+                            </div>
+                            <div class="property-row">
+                                <label>Цвет 2</label>
+                                <div class="color-preview" id="fillGradientColor2Preview" style="background: #8b5cf6; width: 40px; height: 40px; cursor: pointer;"></div>
+                                <input type="color" id="fillGradientColor2" value="#8b5cf6" style="position: absolute; opacity: 0;">
+                            </div>
+                            <div class="property-row">
+                                <label>Угол</label>
+                                <input type="range" id="fillGradientAngle" min="0" max="360" value="90" style="flex: 1;">
+                                <span class="thickness-value" id="fillAngleVal" style="min-width: 45px;">90°</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
     
                 <!-- Фон -->
                 <div class="panel-section">
@@ -870,6 +917,15 @@ let state = {
     triGridSize: 32,
     showHandles: false,
     lastCreatedCurveIdx: -1,
+    // НОВЫЕ ПОЛЯ ДЛЯ ЗАЛИВКИ
+        fillType: 'none',      // 'none', 'solid', 'gradient'
+        fillColor: '#3b82f6',
+        fillGradient: {
+            type: 'linear',    // 'linear', 'radial'
+            color1: '#3b82f6',
+            color2: '#8b5cf6',
+            angle: 90
+        },
     background: {
             type: 'none', // 'none', 'solid', 'gradient'
             solidColor: '#ffffff',
@@ -1006,6 +1062,28 @@ function updatePanelFromSelected() {
         color.value = pathColor;
         if (colorPreview) colorPreview.style.background = pathColor;
         state.color = pathColor;
+        
+        // Загружаем параметры заливки
+        if (fillType) {
+            state.fillType = selectedPath.fillType || 'none';
+            fillType.value = state.fillType;
+            updateFillUI();
+        }
+        
+        if (fillColor) {
+            state.fillColor = selectedPath.fillColor || '#3b82f6';
+            fillColor.value = state.fillColor;
+            if (fillColorPreview) fillColorPreview.style.background = state.fillColor;
+        }
+        
+        if (fillGradientColor1 && selectedPath.fillGradient) {
+            state.fillGradient = JSON.parse(JSON.stringify(selectedPath.fillGradient));
+            fillGradientColor1.value = state.fillGradient.color1;
+            fillGradientColor2.value = state.fillGradient.color2;
+            fillGradientType.value = state.fillGradient.type;
+            fillGradientAngle.value = state.fillGradient.angle;
+            if (fillAngleVal) fillAngleVal.textContent = `${state.fillGradient.angle}°`;
+        }
     }
 }
 
@@ -1316,6 +1394,10 @@ function onMouseUp(e) {
         }
         
         if (newPath) {
+            newPath.fillType = state.fillType;
+            newPath.fillColor = state.fillColor;
+            newPath.fillGradient = JSON.parse(JSON.stringify(state.fillGradient));
+            
             state.paths.push(newPath);
             state.selectedPathIdx = state.paths.length - 1;
             updatePanelFromSelected();
@@ -1652,19 +1734,92 @@ function draw() {
     });
 }
 
-function drawPath(ctx, path) {
+function drawPath(ctx, path, forExport = false) {
+    // Получаем параметры заливки из пути или глобальные
+    const fillType = path.fillType || state.fillType;
+    const fillColor = path.fillColor || state.fillColor;
+    const fillGradient = path.fillGradient || state.fillGradient;
+    
+    // Сначала рисуем заливку (если есть)
+    if (fillType !== 'none') {
+        ctx.save();
+        
+        if (fillType === 'solid') {
+            ctx.fillStyle = fillColor;
+        } else if (fillType === 'gradient') {
+            let gradient;
+            const bounds = getPathBounds(path);
+            
+            if (fillGradient.type === 'linear') {
+                const angleRad = (fillGradient.angle * Math.PI) / 180;
+                const centerX = (bounds.minX + bounds.maxX) / 2;
+                const centerY = (bounds.minY + bounds.maxY) / 2;
+                const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+                
+                const x1 = centerX - Math.cos(angleRad) * radius;
+                const y1 = centerY - Math.sin(angleRad) * radius;
+                const x2 = centerX + Math.cos(angleRad) * radius;
+                const y2 = centerY + Math.sin(angleRad) * radius;
+                gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+            } else {
+                const centerX = (bounds.minX + bounds.maxX) / 2;
+                const centerY = (bounds.minY + bounds.maxY) / 2;
+                const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+                gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+            }
+            
+            gradient.addColorStop(0, fillGradient.color1);
+            gradient.addColorStop(1, fillGradient.color2);
+            ctx.fillStyle = gradient;
+        }
+        
+        // Рисуем залитую фигуру
+        ctx.beginPath();
+        
+        if (path.tool === 'rectangle' && path.points.length === 4) {
+            ctx.moveTo(path.points[0].x, path.points[0].y);
+            for (let i = 1; i < 4; i++) {
+                ctx.lineTo(path.points[i].x, path.points[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            
+        } else if (path.tool === 'circle' && path.points.length === 2) {
+            const center = path.points[0];
+            const radiusPoint = path.points[1];
+            const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
+            ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+        } else if (path.tool === 'curve' && path.points.length === 4 && fillType !== 'none') {
+            // Для кривых нужен замкнутый контур
+            ctx.moveTo(path.points[0].x, path.points[0].y);
+            ctx.bezierCurveTo(
+                path.points[1].x, path.points[1].y,
+                path.points[2].x, path.points[2].y,
+                path.points[3].x, path.points[3].y
+            );
+            // Замыкаем кривую
+            ctx.lineTo(path.points[0].x, path.points[0].y);
+            ctx.fill();
+        }
+        
+        ctx.restore();
+    }
+    
+    // Затем рисуем обводку
+    ctx.beginPath();
+    
     if (path.tool === 'curve' && path.points.length === 4) {
         ctx.moveTo(path.points[0].x, path.points[0].y);
         ctx.bezierCurveTo(
-            path.points[1].x, path.points[1].y,  // первая ручка
-            path.points[2].x, path.points[2].y,  // вторая ручка
-            path.points[3].x, path.points[3].y   // конец
+            path.points[1].x, path.points[1].y,
+            path.points[2].x, path.points[2].y,
+            path.points[3].x, path.points[3].y
         );
     } else if (path.tool === 'curve' && path.points.length === 3) {
-        // Для обратной совместимости со старыми кривыми (квадратичные)
         ctx.moveTo(path.points[0].x, path.points[0].y);
         ctx.quadraticCurveTo(path.points[1].x, path.points[1].y, path.points[2].x, path.points[2].y);
-    
     } else if (path.tool === 'line' && path.points.length === 2) {
         ctx.moveTo(path.points[0].x, path.points[0].y);
         ctx.lineTo(path.points[1].x, path.points[1].y);
@@ -1680,6 +1835,31 @@ function drawPath(ctx, path) {
         const radius = Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y);
         ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     }
+    
+    ctx.stroke();
+}
+
+// Вспомогательная функция для получения границ пути
+function getPathBounds(path) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    
+    if (path.tool === 'circle' && path.points.length === 2) {
+        const center = path.points[0];
+        const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
+        minX = center.x - radius;
+        minY = center.y - radius;
+        maxX = center.x + radius;
+        maxY = center.y + radius;
+    } else {
+        path.points.forEach(p => {
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+        });
+    }
+    
+    return { minX, minY, maxX, maxY };
 }
 
 // 2. Создание новой кривой с двумя ручками
@@ -2471,6 +2651,121 @@ if (colorPreview) {
         if (color) color.click();
     };
 }
+
+// ========== УПРАВЛЕНИЕ ЗАЛИВКОЙ ==========
+const fillType = document.getElementById('fillType');
+const solidFillControl = document.getElementById('solidFillControl');
+const gradientFillControl = document.getElementById('gradientFillControl');
+const fillColor = document.getElementById('fillColor');
+const fillColorPreview = document.getElementById('fillColorPreview');
+const fillGradientColor1 = document.getElementById('fillGradientColor1');
+const fillGradientColor1Preview = document.getElementById('fillGradientColor1Preview');
+const fillGradientColor2 = document.getElementById('fillGradientColor2');
+const fillGradientColor2Preview = document.getElementById('fillGradientColor2Preview');
+const fillGradientType = document.getElementById('fillGradientType');
+const fillGradientAngle = document.getElementById('fillGradientAngle');
+const fillAngleVal = document.getElementById('fillAngleVal');
+
+function updateFillUI() {
+    solidFillControl.style.display = state.fillType === 'solid' ? 'flex' : 'none';
+    gradientFillControl.style.display = state.fillType === 'gradient' ? 'block' : 'none';
+}
+
+if (fillType) {
+    fillType.onchange = (e) => {
+        state.fillType = e.target.value;
+        updateFillUI();
+        
+        if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
+            state.paths[state.selectedPathIdx].fillType = state.fillType;
+            state.paths[state.selectedPathIdx].fillColor = state.fillColor;
+            state.paths[state.selectedPathIdx].fillGradient = JSON.parse(JSON.stringify(state.fillGradient));
+            saveState();
+        }
+        
+        draw();
+    };
+}
+
+if (fillColor) {
+    fillColor.onchange = (e) => {
+        state.fillColor = e.target.value;
+        if (fillColorPreview) fillColorPreview.style.background = e.target.value;
+        
+        if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
+            state.paths[state.selectedPathIdx].fillColor = state.fillColor;
+            saveState();
+        }
+        
+        draw();
+    };
+}
+
+if (fillColorPreview) {
+    fillColorPreview.onclick = () => fillColor.click();
+}
+
+if (fillGradientColor1 && fillGradientColor1Preview) {
+    fillGradientColor1.onchange = (e) => {
+        state.fillGradient.color1 = e.target.value;
+        fillGradientColor1Preview.style.background = e.target.value;
+        
+        if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
+            state.paths[state.selectedPathIdx].fillGradient.color1 = state.fillGradient.color1;
+            saveState();
+        }
+        
+        draw();
+    };
+    
+    fillGradientColor1Preview.onclick = () => fillGradientColor1.click();
+}
+
+if (fillGradientColor2 && fillGradientColor2Preview) {
+    fillGradientColor2.onchange = (e) => {
+        state.fillGradient.color2 = e.target.value;
+        fillGradientColor2Preview.style.background = e.target.value;
+        
+        if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
+            state.paths[state.selectedPathIdx].fillGradient.color2 = state.fillGradient.color2;
+            saveState();
+        }
+        
+        draw();
+    };
+    
+    fillGradientColor2Preview.onclick = () => fillGradientColor2.click();
+}
+
+if (fillGradientType) {
+    fillGradientType.onchange = (e) => {
+        state.fillGradient.type = e.target.value;
+        
+        if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
+            state.paths[state.selectedPathIdx].fillGradient.type = state.fillGradient.type;
+            saveState();
+        }
+        
+        draw();
+    };
+}
+
+if (fillGradientAngle) {
+    fillGradientAngle.oninput = (e) => {
+        const angle = +e.target.value;
+        state.fillGradient.angle = angle;
+        if (fillAngleVal) fillAngleVal.textContent = `${angle}°`;
+        
+        if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
+            state.paths[state.selectedPathIdx].fillGradient.angle = state.fillGradient.angle;
+            saveState();
+        }
+        
+        draw();
+    };
+}
+
+updateFillUI();
 
 // Кнопки действий
 const undoBtn = document.getElementById('undoBtn');
