@@ -799,11 +799,13 @@
                             <select id="gridMode">
                                 <option value="square">Квадратная</option>
                                 <option value="triangular">Треугольная</option>
+                                <option value="isometric">Изометрическая</option>
                             </select>
                         </div>
                         
+                        <!-- Размер для треугольной и изометрической сетки -->
                         <div class="property-row" id="triSizeRow" style="display: none;">
-                            <label>Размер</label>
+                            <label>Размер ячейки</label>
                             <div class="thickness-control">
                                 <span class="thickness-value" id="triSizeVal">32</span>
                                 <input type="range" id="triGridSize" min="16" max="64" value="32" step="4">
@@ -853,6 +855,21 @@
                         <button class="action-btn danger" id="clearBtn">
                             Очистить всё
                         </button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3>Импорт</h3>
+                    <div class="action-buttons">
+                        <button class="action-btn" id="importSVGBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+                                <polyline points="8 12 12 16 16 12"/>
+                                <line x1="12" y1="2" x2="12" y2="16"/>
+                            </svg>
+                            Импорт SVG
+                        </button>
+                        <input type="file" id="svgFileInput" accept=".svg" style="display: none;">
                     </div>
                 </div>
     
@@ -1096,6 +1113,8 @@ function snapXY(x, y) {
     
     if (state.gridMode === 'triangular') {
         return snapToTriangular(x, y);
+    } else if (state.gridMode === 'isometric') {
+        return snapToIsometric(x, y);
     }
     
     // Квадратная сетка
@@ -1105,7 +1124,131 @@ function snapXY(x, y) {
     };
 }
 
-// Получение позиции мыши
+// Привязка к изометрической сетке
+function snapToIsometric(x, y) {
+    const size = state.triGridSize;
+    const angleRad = (state.isoAngle || 30) * Math.PI / 180;
+    
+    // Сетка рисуется из центра (cx, cy).
+    // Ось X (dir = cos(a), sin(a)):  линия i проходит через cx + i*size*(-sin(a), cos(a))
+    // Ось Y (dir = cos(a), -sin(a)): линия i проходит через cx + i*size*(sin(a), cos(a))
+    // Ось Z (dir = 0, 1):            линия i проходит через cx + i*size*(1, 0)
+    //
+    // Узел сетки = пересечение двух линий из разных семейств.
+    // Находим ближайший узел прямым перебором.
+    
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const cosA = Math.cos(angleRad);
+    const sinA = Math.sin(angleRad);
+    
+    // Максимальный индекс линии, который может быть виден на канвасе
+    const maxI = Math.ceil(Math.max(canvas.width, canvas.height) / size) + 5;
+    
+    let bestX = x, bestY = y;
+    let bestDist = Infinity;
+    
+    // Перебираем все видимые линии оси X
+    for (let iX = -maxI; iX <= maxI; iX++) {
+        // Точка на линии оси X: центр + iX * size * perpX
+        // perpX = (-sin(a), cos(a))
+        const px = cx + iX * size * (-sinA);
+        const py = cy + iX * size * cosA;
+        
+        // Перебираем все видимые линии оси Y
+        for (let iY = -maxI; iY <= maxI; iY++) {
+            // Точка на линии оси Y: центр + iY * size * perpY
+            // perpY = (sin(a), cos(a))
+            const qx = cx + iY * size * sinA;
+            const qy = cy + iY * size * cosA;
+            
+            // Пересечение линий iX (оси X) и iY (оси Y):
+            // Линия X проходит через (px, py) в направлении (cosA, sinA)
+            // Линия Y проходит через (qx, qy) в направлении (cosA, -sinA)
+            //
+            // Параметрически:
+            //   X: (px + t*cosA, py + t*sinA)
+            //   Y: (qx + s*cosA, qy - s*sinA)
+            //
+            // Приравниваем: px + t*cosA = qx + s*cosA
+            //              py + t*sinA = qy - s*sinA
+            //
+            // Из первого: t*cosA - s*cosA = qx - px → (t-s)*cosA = qx - px
+            // Из второго: t*sinA + s*sinA = qy - py → (t+s)*sinA = qy - py
+            //
+            // t = ((qx-px)/cosA + (qy-py)/sinA) / 2
+            // s = ((qy-py)/sinA - (qx-px)/cosA) / 2
+            
+            const dpx = qx - px;
+            const dpy = qy - py;
+            
+            if (Math.abs(cosA) > 1e-10 && Math.abs(sinA) > 1e-10) {
+                const t = (dpx / cosA + dpy / sinA) / 2;
+                const nx = px + t * cosA;
+                const ny = py + t * sinA;
+                
+                const dist = Math.hypot(nx - x, ny - y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestX = nx;
+                    bestY = ny;
+                }
+            }
+        }
+        
+        // Пересечение оси X и оси Z:
+        // Линия Z iZ проходит через (cx + iZ*size, cy) в направлении (0, 1)
+        for (let iZ = -maxI; iZ <= maxI; iZ++) {
+            const rz = cx + iZ * size;
+            
+            // Пересечение: (px + t*cosA, py + t*sinA) = (rz, cy + s)
+            // px + t*cosA = rz → t = (rz - px) / cosA
+            // py + t*sinA = cy + s → s = py + t*sinA - cy
+            
+            if (Math.abs(cosA) > 1e-10) {
+                const tz = (rz - px) / cosA;
+                const nzx = px + tz * cosA;
+                const nzy = py + tz * sinA;
+                
+                const distZ = Math.hypot(nzx - x, nzy - y);
+                if (distZ < bestDist) {
+                    bestDist = distZ;
+                    bestX = nzx;
+                    bestY = nzy;
+                }
+            }
+        }
+    }
+    
+    // Пересечение оси Y и оси Z:
+    for (let iY = -maxI; iY <= maxI; iY++) {
+        const qx = cx + iY * size * sinA;
+        const qy = cy + iY * size * cosA;
+        
+        for (let iZ = -maxI; iZ <= maxI; iZ++) {
+            const rz = cx + iZ * size;
+            
+            // Пересечение: (qx + s*cosA, qy - s*sinA) = (rz, cy + t)
+            // qx + s*cosA = rz → s = (rz - qx) / cosA
+            if (Math.abs(cosA) > 1e-10) {
+                const sz = (rz - qx) / cosA;
+                const nzx = qx + sz * cosA;
+                const nzy = qy - sz * sinA;
+                
+                const distZ = Math.hypot(nzx - x, nzy - y);
+                if (distZ < bestDist) {
+                    bestDist = distZ;
+                    bestX = nzx;
+                    bestY = nzy;
+                }
+            }
+        }
+    }
+    
+    return { x: bestX, y: bestY };
+}
+
+// Получение позиции мыши (исправленная версия)
 function getMousePos(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -1113,9 +1256,14 @@ function getMousePos(e) {
     const rawX = (e.clientX - rect.left) * scaleX;
     const rawY = (e.clientY - rect.top) * scaleY;
     
+    if (!state.snap) return {x: rawX, y: rawY};
+    
     if (state.gridMode === 'triangular') {
         return snapToTriangular(rawX, rawY);
+    } else if (state.gridMode === 'isometric') {
+        return snapToIsometric(rawX, rawY);
     }
+    
     return snapXY(rawX, rawY);
 }
 
@@ -2251,14 +2399,7 @@ function drawHandles(ctx, path, idx) {
             ctx.arc(x, y, size + 1, 0, Math.PI * 2);
             ctx.fill();
             
-            <!-- // Слой 3: Тёмная обводка для контраста -->
-            <!-- ctx.strokeStyle = '#1a1a1a'; -->
-            <!-- ctx.lineWidth = 1.5; -->
-            <!-- ctx.beginPath(); -->
-            <!-- ctx.arc(x, y, size + 1, 0, Math.PI * 2); -->
-            <!-- ctx.stroke(); -->
-            
-            // Слой 4: Белая внутренняя точка (блик)
+            // Слой 3: Белая внутренняя точка (блик)
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(x, y, Math.max(2, size / 2), 0, Math.PI * 2);
@@ -2362,11 +2503,80 @@ function snapToTriangular(x, y) {
     return {x: snapX, y: snapY};
 }
 
+// Отрисовка изометрической сетки
+// Отрисовка изометрической сетки
+function drawIsometricGrid() {
+    const size = state.triGridSize;
+    const angleRad = (state.isoAngle || 30) * Math.PI / 180; // 30 градусов по умолчанию
+    
+    ctx.save();
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 0.8;
+    
+    const w = canvas.width;
+    const h = canvas.height;
+    
+    // Направления осей изометрии
+    // Ось X (вправо-вниз)
+    const dx1 = Math.cos(angleRad);
+    const dy1 = Math.sin(angleRad);
+    // Ось Y (влево-вниз)
+    const dx2 = Math.cos(-angleRad);
+    const dy2 = Math.sin(-angleRad);
+    // Ось Z (вертикально вниз)
+    const dx3 = 0;
+    const dy3 = 1;
+    
+    // Количество линий
+    const lines = Math.ceil(Math.max(w, h) / size) + 10;
+    const centerX = w / 2;
+    const centerY = h / 2;
+    
+    // Рисуем линии параллельные осям
+    const directions = [
+        { dx: dx1, dy: dy1 }, // Ось X
+        { dx: dx2, dy: dy2 }, // Ось Y
+        { dx: dx3, dy: dy3 }  // Ось Z
+    ];
+    
+    for (let dirIdx = 0; dirIdx < directions.length; dirIdx++) {
+        const dir = directions[dirIdx];
+        // Перпендикулярное направление для смещения линий
+        const perpX = -dir.dy;
+        const perpY = dir.dx;
+        
+        for (let i = -lines; i <= lines; i++) {
+            const offset = i * size;
+            
+            // Начальная точка линии
+            const startX = centerX + offset * perpX - lines * size * dir.dx;
+            const startY = centerY + offset * perpY - lines * size * dir.dy;
+            
+            // Конечная точка линии
+            const endX = centerX + offset * perpX + lines * size * dir.dx;
+            const endY = centerY + offset * perpY + lines * size * dir.dy;
+            
+            // Обрезаем линии по границам канваса
+            if (startX > w && endX > w) continue;
+            if (startX < 0 && endX < 0) continue;
+            if (startY > h && endY > h) continue;
+            if (startY < 0 && endY < 0) continue;
+            
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+        }
+    }
+    
+    ctx.restore();
+}
 
 function drawGrid() {
     if (!state.snap) return;
     
     if (state.gridMode === 'square') {
+        // Квадратная сетка
         ctx.save();
         ctx.strokeStyle = '#e8e8e8';
         ctx.lineWidth = 1;
@@ -2387,6 +2597,9 @@ function drawGrid() {
         
     } else if (state.gridMode === 'triangular') {
         drawTriangularGrid();
+        
+    } else if (state.gridMode === 'isometric') {
+        drawIsometricGrid();
     }
 }
 
@@ -3270,6 +3483,202 @@ if (panelToggle && rightPanel) {
     };
 }
 
+// ========== ИМПОРТ SVG ==========
+const importSVGBtn = document.getElementById('importSVGBtn');
+const svgFileInput = document.getElementById('svgFileInput');
+
+function parseSVGToPaths(svgString) {
+    const parser = new DOMParser();
+    const svgDoc = parser.parseFromString(svgString, 'image/svg+xml');
+    const svgElement = svgDoc.querySelector('svg');
+    
+    if (!svgElement) {
+        alert('Невалидный SVG файл');
+        return [];
+    }
+    
+    const paths = [];
+    
+    // Получаем viewBox или размеры
+    let viewBox = svgElement.getAttribute('viewBox');
+    let svgWidth = parseFloat(svgElement.getAttribute('width')) || 512;
+    let svgHeight = parseFloat(svgElement.getAttribute('height')) || 512;
+    
+    if (viewBox) {
+        const parts = viewBox.split(/[ ,]+/);
+        svgWidth = parseFloat(parts[2]);
+        svgHeight = parseFloat(parts[3]);
+    }
+    
+    // Масштабируем под наш канвас 512×512
+    const scaleX = 512 / svgWidth;
+    const scaleY = 512 / svgHeight;
+    const scale = Math.min(scaleX, scaleY);
+    const offsetX = (512 - svgWidth * scale) / 2;
+    const offsetY = (512 - svgHeight * scale) / 2;
+    
+    // Парсим все path элементы
+    const pathElements = svgDoc.querySelectorAll('path');
+    pathElements.forEach(pathEl => {
+        const d = pathEl.getAttribute('d');
+        const stroke = pathEl.getAttribute('stroke') || state.color;
+        const strokeWidth = parseFloat(pathEl.getAttribute('stroke-width')) || state.thickness;
+        const fill = pathEl.getAttribute('fill') || 'none';
+        
+        // Парсим команды path
+        const commands = d.match(/[MmLlCcQqZz][^MmLlCcQqZz]*/g);
+        if (!commands) return;
+        
+        let currentPath = null;
+        let lastPoint = null;
+        
+        for (let cmd of commands) {
+            const type = cmd[0];
+            const coords = cmd.slice(1).trim().split(/[\s,]+/).map(Number);
+            
+            if (type === 'M' || type === 'm') {
+                if (currentPath && currentPath.points.length >= 2) {
+                    paths.push(currentPath);
+                }
+                const x = (coords[0] * scale + offsetX);
+                const y = (coords[1] * scale + offsetY);
+                currentPath = {
+                    tool: 'curve',
+                    points: [{x, y}],
+                    thickness: strokeWidth,
+                    color: stroke,
+                    fillType: fill !== 'none' ? 'solid' : 'none',
+                    fillColor: fill !== 'none' ? fill : state.fillColor
+                };
+                lastPoint = {x, y};
+                
+            } else if ((type === 'L' || type === 'l') && currentPath) {
+                for (let i = 0; i < coords.length; i += 2) {
+                    const x = (coords[i] * scale + offsetX);
+                    const y = (coords[i+1] * scale + offsetY);
+                    currentPath.points.push({x, y});
+                    lastPoint = {x, y};
+                }
+                
+            } else if ((type === 'C' || type === 'c') && currentPath) {
+                for (let i = 0; i < coords.length; i += 6) {
+                    const p1 = {x: coords[i] * scale + offsetX, y: coords[i+1] * scale + offsetY};
+                    const p2 = {x: coords[i+2] * scale + offsetX, y: coords[i+3] * scale + offsetY};
+                    const p3 = {x: coords[i+4] * scale + offsetX, y: coords[i+5] * scale + offsetY};
+                    currentPath.points.push(p1, p2, p3);
+                    lastPoint = p3;
+                }
+                
+            } else if ((type === 'Q' || type === 'q') && currentPath) {
+                for (let i = 0; i < coords.length; i += 4) {
+                    const p1 = {x: coords[i] * scale + offsetX, y: coords[i+1] * scale + offsetY};
+                    const p2 = {x: coords[i+2] * scale + offsetX, y: coords[i+3] * scale + offsetY};
+                    currentPath.points.push(p1, p2);
+                    lastPoint = p2;
+                }
+                
+            } else if (type === 'Z' || type === 'z') {
+                if (currentPath && currentPath.points.length > 0 && lastPoint) {
+                    const firstPoint = currentPath.points[0];
+                    currentPath.points.push({x: firstPoint.x, y: firstPoint.y});
+                }
+            }
+        }
+        
+        if (currentPath && currentPath.points.length >= 2) {
+            // Определяем тип фигуры
+            if (currentPath.points.length === 4 && 
+                Math.abs(currentPath.points[0].x - currentPath.points[3].x) < 5 &&
+                Math.abs(currentPath.points[0].y - currentPath.points[3].y) < 5 &&
+                currentPath.points[1].x === currentPath.points[0].x) {
+                // Возможно, прямоугольник
+                currentPath.tool = 'rectangle';
+            } else if (currentPath.points.length === 2) {
+                currentPath.tool = 'line';
+            } else {
+                currentPath.tool = 'curve';
+            }
+            paths.push(currentPath);
+        }
+    });
+    
+    // Парсим circle элементы
+    const circleElements = svgDoc.querySelectorAll('circle');
+    circleElements.forEach(circle => {
+        const cx = parseFloat(circle.getAttribute('cx')) * scale + offsetX;
+        const cy = parseFloat(circle.getAttribute('cy')) * scale + offsetY;
+        const r = parseFloat(circle.getAttribute('r')) * scale;
+        const stroke = circle.getAttribute('stroke') || state.color;
+        const strokeWidth = parseFloat(circle.getAttribute('stroke-width')) || state.thickness;
+        const fill = circle.getAttribute('fill') || 'none';
+        
+        paths.push({
+            tool: 'circle',
+            points: [{x: cx, y: cy}, {x: cx + r, y: cy}],
+            thickness: strokeWidth,
+            color: stroke,
+            fillType: fill !== 'none' ? 'solid' : 'none',
+            fillColor: fill !== 'none' ? fill : state.fillColor
+        });
+    });
+    
+    // Парсим rect элементы
+    const rectElements = svgDoc.querySelectorAll('rect');
+    rectElements.forEach(rect => {
+        const x = parseFloat(rect.getAttribute('x')) * scale + offsetX;
+        const y = parseFloat(rect.getAttribute('y')) * scale + offsetY;
+        const w = parseFloat(rect.getAttribute('width')) * scale;
+        const h = parseFloat(rect.getAttribute('height')) * scale;
+        const stroke = rect.getAttribute('stroke') || state.color;
+        const strokeWidth = parseFloat(rect.getAttribute('stroke-width')) || state.thickness;
+        const fill = rect.getAttribute('fill') || 'none';
+        
+        paths.push({
+            tool: 'rectangle',
+            points: [{x, y}, {x: x + w, y}, {x: x + w, y: y + h}, {x, y: y + h}],
+            thickness: strokeWidth,
+            color: stroke,
+            fillType: fill !== 'none' ? 'solid' : 'none',
+            fillColor: fill !== 'none' ? fill : state.fillColor
+        });
+    });
+    
+    return paths;
+}
+
+// Обработчик импорта
+if (importSVGBtn && svgFileInput) {
+    importSVGBtn.onclick = () => {
+        svgFileInput.click();
+    };
+    
+    svgFileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const svgString = event.target.result;
+            const newPaths = parseSVGToPaths(svgString);
+            
+            if (newPaths.length > 0) {
+                // Добавляем новые пути
+                state.paths.push(...newPaths);
+                state.selectedPathIdx = state.paths.length - 1;
+                saveState();
+                draw();
+                alert(`✅ Импортировано ${newPaths.length} фигур`);
+            } else {
+                alert('❌ Не удалось импортировать SVG. Проверьте формат файла.');
+            }
+            
+            // Очищаем input
+            svgFileInput.value = '';
+        };
+        reader.readAsText(file);
+    };
+}
+
 // Кнопки экспорта
 const exportFaviconBtn = document.getElementById('exportFaviconBtn');
 const exportSpriteBtn = document.getElementById('exportSpriteBtn');
@@ -3797,8 +4206,10 @@ const squareSizeRow = document.getElementById('squareSizeRow');
 const triSizeRow = document.getElementById('triSizeRow');
 const triGridSizeInput = document.getElementById('triGridSize');
 const triSizeVal = document.getElementById('triSizeVal');
+const isoAngleRow = document.getElementById('isoAngleRow');
+const isoAngleInput = document.getElementById('isoAngle');
+const isoAngleVal = document.getElementById('isoAngleVal');
 
-// Функция обновления видимости
 function updateGridUI() {
     if (state.gridMode === 'square') {
         if (squareSizeRow) squareSizeRow.style.display = 'flex';
@@ -3806,7 +4217,19 @@ function updateGridUI() {
     } else if (state.gridMode === 'triangular') {
         if (squareSizeRow) squareSizeRow.style.display = 'none';
         if (triSizeRow) triSizeRow.style.display = 'flex';
+    } else if (state.gridMode === 'isometric') {
+        if (squareSizeRow) squareSizeRow.style.display = 'none';
+        if (triSizeRow) triSizeRow.style.display = 'flex';  // Используем тот же ползунок
     }
+}
+
+// Обработчик изменения угла изометрии
+if (isoAngleInput) {
+    isoAngleInput.oninput = (e) => {
+        state.isoAngle = +e.target.value;
+        if (isoAngleVal) isoAngleVal.textContent = `${state.isoAngle}°`;
+        draw();
+    };
 }
 
 // Обработчик смены режима
