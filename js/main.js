@@ -14,6 +14,7 @@ let state = {
   tool: "select",
   paths: [],
   history: [[]],
+  redoHistory: [],
   currentPath: [],
   isDrawing: false,
   isDragging: false,
@@ -990,14 +991,9 @@ function hasVisibleAppearance(path) {
   return hasFill || hasStroke;
 }
 
-// Отрисовка временного контура для невидимых фигур
+// Отрисовка временного контура для фигур с заливкой, но без обводки
 function drawGhostOutline(ctx, path) {
-  console.log(
-    "Рисуем призрачный контур для:",
-    path.tool,
-    "с точками:",
-    path.points,
-  );
+  if (path.tool !== "rectangle" && path.tool !== "circle") return;
 
   ctx.save();
   ctx.strokeStyle = "#3b82f6";
@@ -1005,33 +1001,106 @@ function drawGhostOutline(ctx, path) {
   ctx.setLineDash([4, 4]);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  buildShapePath(ctx, path);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ========== ЕДИНАЯ ФУНКЦИЯ ПОСТРОЕНИЯ КОНТУРА ФИГУРЫ ==========
+function buildShapePath(ctx, path, roundCoords = false) {
+  const r = roundCoords ? (v) => Math.round(v) : (v) => v;
+
   ctx.beginPath();
 
-  if (path.tool === "rectangle" && path.points.length === 4) {
-    console.log("Рисуем прямоугольник:", path.points);
-    ctx.moveTo(path.points[0].x, path.points[0].y);
+  if (path.tool === "curve" && path.points.length === 4) {
+    ctx.moveTo(r(path.points[0].x), r(path.points[0].y));
+    ctx.bezierCurveTo(
+      r(path.points[1].x), r(path.points[1].y),
+      r(path.points[2].x), r(path.points[2].y),
+      r(path.points[3].x), r(path.points[3].y),
+    );
+  } else if (path.tool === "curve" && path.points.length === 3) {
+    ctx.moveTo(r(path.points[0].x), r(path.points[0].y));
+    ctx.quadraticCurveTo(
+      r(path.points[1].x), r(path.points[1].y),
+      r(path.points[2].x), r(path.points[2].y),
+    );
+  } else if (path.tool === "line" && path.points.length === 2) {
+    ctx.moveTo(r(path.points[0].x), r(path.points[0].y));
+    ctx.lineTo(r(path.points[1].x), r(path.points[1].y));
+  } else if (path.tool === "rectangle" && path.points.length === 4) {
+    ctx.moveTo(r(path.points[0].x), r(path.points[0].y));
     for (let i = 1; i < 4; i++) {
-      ctx.lineTo(path.points[i].x, path.points[i].y);
+      ctx.lineTo(r(path.points[i].x), r(path.points[i].y));
     }
     ctx.closePath();
   } else if (path.tool === "circle" && path.points.length === 2) {
     const center = path.points[0];
-    const radiusPoint = path.points[1];
     const radius = Math.hypot(
-      radiusPoint.x - center.x,
-      radiusPoint.y - center.y,
+      path.points[1].x - center.x,
+      path.points[1].y - center.y,
     );
-    console.log("Рисуем круг:", center, radius);
-    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-  } else {
-    console.log("Неизвестная фигура или не поддерживается:", path.tool);
+    ctx.arc(r(center.x), r(center.y), radius, 0, Math.PI * 2);
+  }
+}
+
+// ========== ЕДИНАЯ ФУНКЦИЯ РЕНДЕРА ФИГУРЫ (заливка + обводка) ==========
+function renderShape(ctx, path, roundCoords = false) {
+  const fillType = path.fillType || state.fillType;
+  const fillColor = path.fillColor || state.fillColor;
+  const fillGradient = path.fillGradient || state.fillGradient;
+  const pathColor = path.color || state.color;
+  const pathThickness = path.thickness !== undefined ? path.thickness : state.thickness;
+
+  // Заливка (только для rectangle и circle)
+  if (fillType !== "none" && (path.tool === "rectangle" || path.tool === "circle")) {
+    ctx.save();
+
+    if (fillType === "solid") {
+      ctx.fillStyle = fillColor;
+    } else if (fillType === "gradient") {
+      let gradient;
+      const bounds = getPathBounds(path);
+
+      if (fillGradient.type === "linear") {
+        const angleRad = (fillGradient.angle * Math.PI) / 180;
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerY = (bounds.minY + bounds.maxY) / 2;
+        const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+        const x1 = centerX - Math.cos(angleRad) * radius;
+        const y1 = centerY - Math.sin(angleRad) * radius;
+        const x2 = centerX + Math.cos(angleRad) * radius;
+        const y2 = centerY + Math.sin(angleRad) * radius;
+        gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+      } else {
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerY = (bounds.minY + bounds.maxY) / 2;
+        const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+        gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+      }
+
+      gradient.addColorStop(0, fillGradient.color1);
+      gradient.addColorStop(1, fillGradient.color2);
+      ctx.fillStyle = gradient;
+    }
+
+    buildShapePath(ctx, path, roundCoords);
+    ctx.fill();
     ctx.restore();
-    return;
   }
 
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
+  // Обводка (только если толщина > 0)
+  if (pathThickness > 0) {
+    ctx.save();
+    ctx.strokeStyle = pathColor;
+    ctx.lineWidth = pathThickness;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    buildShapePath(ctx, path, roundCoords);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function draw() {
@@ -1055,11 +1124,8 @@ function draw() {
         gradient = ctx.createLinearGradient(x1, y1, x2, y2);
       } else {
         gradient = ctx.createRadialGradient(
-          canvas.width / 2,
-          canvas.height / 2,
-          0,
-          canvas.width / 2,
-          canvas.height / 2,
+          canvas.width / 2, canvas.height / 2, 0,
+          canvas.width / 2, canvas.height / 2,
           Math.max(canvas.width, canvas.height) / 2,
         );
       }
@@ -1073,140 +1139,16 @@ function draw() {
 
   drawGrid();
 
-  // ========== СНАЧАЛА РИСУЕМ ВСЕ ЗАЛИВКИ ==========
-  state.paths.forEach((path, idx) => {
-    const fillType = path.fillType || state.fillType;
-
-    // Рисуем заливку, если она есть
-    if (fillType !== "none") {
-      ctx.save();
-
-      if (fillType === "solid") {
-        const fillColor = path.fillColor || state.fillColor;
-        ctx.fillStyle = fillColor;
-      } else if (fillType === "gradient") {
-        const fillGradient = path.fillGradient || state.fillGradient;
-        let gradient;
-        const bounds = getPathBounds(path);
-
-        if (fillGradient.type === "linear") {
-          const angleRad = (fillGradient.angle * Math.PI) / 180;
-          const centerX = (bounds.minX + bounds.maxX) / 2;
-          const centerY = (bounds.minY + bounds.maxY) / 2;
-          const radius =
-            Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
-
-          const x1 = centerX - Math.cos(angleRad) * radius;
-          const y1 = centerY - Math.sin(angleRad) * radius;
-          const x2 = centerX + Math.cos(angleRad) * radius;
-          const y2 = centerY + Math.sin(angleRad) * radius;
-          gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-        } else {
-          const centerX = (bounds.minX + bounds.maxX) / 2;
-          const centerY = (bounds.minY + bounds.maxY) / 2;
-          const radius =
-            Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
-          gradient = ctx.createRadialGradient(
-            centerX,
-            centerY,
-            0,
-            centerX,
-            centerY,
-            radius,
-          );
-        }
-
-        gradient.addColorStop(0, fillGradient.color1);
-        gradient.addColorStop(1, fillGradient.color2);
-        ctx.fillStyle = gradient;
-      }
-
-      ctx.beginPath();
-
-      if (path.tool === "rectangle" && path.points.length === 4) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < 4; i++) {
-          ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
-        ctx.closePath();
-        ctx.fill();
-      } else if (path.tool === "circle" && path.points.length === 2) {
-        const center = path.points[0];
-        const radiusPoint = path.points[1];
-        const radius = Math.hypot(
-          radiusPoint.x - center.x,
-          radiusPoint.y - center.y,
-        );
-        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.restore();
-    }
-  });
-
-  // ========== ЗАТЕМ РИСУЕМ ВСЕ ОБВОДКИ (только если толщина > 0) ==========
-  state.paths.forEach((path, idx) => {
-    const pathThickness =
-      path.thickness !== undefined ? path.thickness : state.thickness;
-    const pathColor = path.color || state.color;
-
-    if (pathThickness > 0) {
-      ctx.save();
-      ctx.strokeStyle = pathColor;
-      ctx.lineWidth = pathThickness;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-
-      if (path.tool === "curve" && path.points.length === 4) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        ctx.bezierCurveTo(
-          path.points[1].x,
-          path.points[1].y,
-          path.points[2].x,
-          path.points[2].y,
-          path.points[3].x,
-          path.points[3].y,
-        );
-      } else if (path.tool === "curve" && path.points.length === 3) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        ctx.quadraticCurveTo(
-          path.points[1].x,
-          path.points[1].y,
-          path.points[2].x,
-          path.points[2].y,
-        );
-      } else if (path.tool === "line" && path.points.length === 2) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        ctx.lineTo(path.points[1].x, path.points[1].y);
-      } else if (path.tool === "rectangle" && path.points.length === 4) {
-        ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < 4; i++) {
-          ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
-        ctx.closePath();
-      } else if (path.tool === "circle" && path.points.length === 2) {
-        const center = path.points[0];
-        const radiusPoint = path.points[1];
-        const radius = Math.hypot(
-          radiusPoint.x - center.x,
-          radiusPoint.y - center.y,
-        );
-        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      }
-
-      ctx.stroke();
-      ctx.restore();
-    }
+  // ========== РИСУЕМ ВСЕ ФИГУРЫ ЧЕРЕЗ ЕДИНЫЙ РЕНДЕР ==========
+  state.paths.forEach((path) => {
+    renderShape(ctx, path);
   });
 
   // ========== ПОДСВЕТКА ВЫДЕЛЕННОГО ПУТИ (поверх всего) ==========
   if (state.tool === "select") {
     state.paths.forEach((path, idx) => {
       if (idx === state.selectedPathIdx) {
-        const pathThickness =
-          path.thickness !== undefined ? path.thickness : state.thickness;
+        const pathThickness = path.thickness !== undefined ? path.thickness : state.thickness;
         const glowWidth = pathThickness > 0 ? pathThickness + 8 : 6;
 
         ctx.save();
@@ -1214,45 +1156,7 @@ function draw() {
         ctx.lineWidth = glowWidth;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        ctx.beginPath();
-
-        if (path.tool === "curve" && path.points.length === 4) {
-          ctx.moveTo(path.points[0].x, path.points[0].y);
-          ctx.bezierCurveTo(
-            path.points[1].x,
-            path.points[1].y,
-            path.points[2].x,
-            path.points[2].y,
-            path.points[3].x,
-            path.points[3].y,
-          );
-        } else if (path.tool === "curve" && path.points.length === 3) {
-          ctx.moveTo(path.points[0].x, path.points[0].y);
-          ctx.quadraticCurveTo(
-            path.points[1].x,
-            path.points[1].y,
-            path.points[2].x,
-            path.points[2].y,
-          );
-        } else if (path.tool === "line" && path.points.length === 2) {
-          ctx.moveTo(path.points[0].x, path.points[0].y);
-          ctx.lineTo(path.points[1].x, path.points[1].y);
-        } else if (path.tool === "rectangle" && path.points.length === 4) {
-          ctx.moveTo(path.points[0].x, path.points[0].y);
-          for (let i = 1; i < 4; i++) {
-            ctx.lineTo(path.points[i].x, path.points[i].y);
-          }
-          ctx.closePath();
-        } else if (path.tool === "circle" && path.points.length === 2) {
-          const center = path.points[0];
-          const radiusPoint = path.points[1];
-          const radius = Math.hypot(
-            radiusPoint.x - center.x,
-            radiusPoint.y - center.y,
-          );
-          ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-        }
-
+        buildShapePath(ctx, path);
         ctx.stroke();
         ctx.restore();
       }
@@ -1346,128 +1250,7 @@ function draw() {
   }
 }
 
-function drawPath(ctx, path, forExport = false) {
-  const fillType = path.fillType || state.fillType;
-  const fillColor = path.fillColor || state.fillColor;
-  const fillGradient = path.fillGradient || state.fillGradient;
-
-  const pathColor = path.color || state.color;
-  const pathThickness =
-    path.thickness !== undefined ? path.thickness : state.thickness;
-
-  // ========== РИСУЕМ ЗАЛИВКУ ==========
-  if (fillType !== "none") {
-    ctx.save();
-
-    if (fillType === "solid") {
-      ctx.fillStyle = fillColor;
-    } else if (fillType === "gradient") {
-      let gradient;
-      const bounds = getPathBounds(path);
-
-      if (fillGradient.type === "linear") {
-        const angleRad = (fillGradient.angle * Math.PI) / 180;
-        const centerX = (bounds.minX + bounds.maxX) / 2;
-        const centerY = (bounds.minY + bounds.maxY) / 2;
-        const radius =
-          Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
-
-        const x1 = centerX - Math.cos(angleRad) * radius;
-        const y1 = centerY - Math.sin(angleRad) * radius;
-        const x2 = centerX + Math.cos(angleRad) * radius;
-        const y2 = centerY + Math.sin(angleRad) * radius;
-        gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-      } else {
-        const centerX = (bounds.minX + bounds.maxX) / 2;
-        const centerY = (bounds.minY + bounds.maxY) / 2;
-        const radius =
-          Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
-        gradient = ctx.createRadialGradient(
-          centerX,
-          centerY,
-          0,
-          centerX,
-          centerY,
-          radius,
-        );
-      }
-
-      gradient.addColorStop(0, fillGradient.color1);
-      gradient.addColorStop(1, fillGradient.color2);
-      ctx.fillStyle = gradient;
-    }
-
-    ctx.beginPath();
-
-    if (path.tool === "rectangle" && path.points.length === 4) {
-      ctx.moveTo(path.points[0].x, path.points[0].y);
-      for (let i = 1; i < 4; i++) {
-        ctx.lineTo(path.points[i].x, path.points[i].y);
-      }
-      ctx.closePath();
-      ctx.fill();
-    } else if (path.tool === "circle" && path.points.length === 2) {
-      const center = path.points[0];
-      const radiusPoint = path.points[1];
-      const radius = Math.hypot(
-        radiusPoint.x - center.x,
-        radiusPoint.y - center.y,
-      );
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  // ========== РИСУЕМ ОБВОДКУ (только если толщина > 0) ==========
-  if (pathThickness > 0) {
-    ctx.beginPath();
-    ctx.strokeStyle = pathColor;
-    ctx.lineWidth = pathThickness;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    if (path.tool === "curve" && path.points.length === 4) {
-      ctx.moveTo(path.points[0].x, path.points[0].y);
-      ctx.bezierCurveTo(
-        path.points[1].x,
-        path.points[1].y,
-        path.points[2].x,
-        path.points[2].y,
-        path.points[3].x,
-        path.points[3].y,
-      );
-    } else if (path.tool === "curve" && path.points.length === 3) {
-      ctx.moveTo(path.points[0].x, path.points[0].y);
-      ctx.quadraticCurveTo(
-        path.points[1].x,
-        path.points[1].y,
-        path.points[2].x,
-        path.points[2].y,
-      );
-    } else if (path.tool === "line" && path.points.length === 2) {
-      ctx.moveTo(path.points[0].x, path.points[0].y);
-      ctx.lineTo(path.points[1].x, path.points[1].y);
-    } else if (path.tool === "rectangle" && path.points.length === 4) {
-      ctx.moveTo(path.points[0].x, path.points[0].y);
-      for (let i = 1; i < 4; i++) {
-        ctx.lineTo(path.points[i].x, path.points[i].y);
-      }
-      ctx.closePath();
-    } else if (path.tool === "circle" && path.points.length === 2) {
-      const center = path.points[0];
-      const radiusPoint = path.points[1];
-      const radius = Math.hypot(
-        radiusPoint.x - center.x,
-        radiusPoint.y - center.y,
-      );
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-    }
-
-    ctx.stroke();
-  }
-}
+// drawPath больше не нужна — используем renderShape(ctx, path)
 
 // Вспомогательная функция для получения границ пути
 function getPathBounds(path) {
@@ -1616,10 +1399,9 @@ function drawHandles(ctx, path, idx) {
       ctx.arc(x, y, size + 3, 0, Math.PI * 2);
       ctx.fill();
 
-      // Слой 2: Яркий цвет ручки
-      // Первая ручка - красная/оранжевая, вторая - синяя/голубая
-      const handleColor = isFirstHandle ? "#ff6600" : "#ff6600";
-      const dragColor = isFirstHandle ? "#ff6600" : "#ff6600";
+      // Слой 2: Яркий цвет ручки (обе ручки одного цвета, чтобы не пестрило)
+      const handleColor = "#ff6600";
+      const dragColor = "#ff6600";
 
       ctx.fillStyle = isDragging ? dragColor : handleColor;
       ctx.beginPath();
@@ -1850,6 +1632,9 @@ function saveState() {
   };
   state.history.push(fullState);
 
+  // Новое действие сбрасывает redo
+  state.redoHistory = [];
+
   // Ограничиваем историю 50 шагами
   while (state.history.length > 50) {
     state.history.shift();
@@ -1867,7 +1652,14 @@ function undo() {
     return false;
   }
 
-  // Удаляем текущее состояние
+  // Сохраняем текущее состояние в redo перед откатом
+  const currentState = {
+    paths: JSON.parse(JSON.stringify(state.paths)),
+    background: JSON.parse(JSON.stringify(state.background)),
+  };
+  state.redoHistory.push(currentState);
+
+  // Удаляем текущее состояние из history
   state.history.pop();
 
   // Загружаем предыдущее
@@ -1895,17 +1687,42 @@ function undo() {
   return true;
 }
 
-// Повтор действия (Redo) - исправлен
+// Повтор действия (Redo)
 function redo() {
-  console.log("⏩ Redo пока не реализован (нужен отдельный стек)");
-  // Для полноценного redo нужен отдельный стек (redoHistory)
-  // Пока просто показываем сообщение
-  const status = document.createElement("div");
-  status.className = "status-bar";
-  status.textContent = "Redo будет в следующей версии";
-  status.style.bottom = "80px";
-  document.body.appendChild(status);
-  setTimeout(() => status.remove(), 1500);
+  console.log("⏩ Redo вызван, redo-стек:", state.redoHistory.length);
+
+  if (state.redoHistory.length === 0) {
+    console.log("⚠️ Нечего повторять");
+    return false;
+  }
+
+  // Сохраняем текущее состояние в history перед redo
+  const currentState = {
+    paths: JSON.parse(JSON.stringify(state.paths)),
+    background: JSON.parse(JSON.stringify(state.background)),
+  };
+  state.history.push(currentState);
+
+  // Загружаем последнее состояние из redo
+  const redoState = state.redoHistory.pop();
+
+  state.paths = JSON.parse(JSON.stringify(redoState.paths));
+  state.background = JSON.parse(JSON.stringify(redoState.background));
+
+  // Обновляем UI фона
+  updateBackgroundUI();
+
+  // Сбрасываем выделение
+  state.selectedPathIdx = -1;
+  state.showHandles = false;
+  state.isDrawing = false;
+  state.isDragging = false;
+
+  // Перерисовываем
+  draw();
+
+  console.log("✅ Redo выполнен, осталось в redo:", state.redoHistory.length);
+  return true;
 }
 
 // Очистка всего (исправлена - без переопределения)
@@ -2055,16 +1872,17 @@ function exportSVG() {
       // Определяем градиент
       let gradientDef = "";
       if (fillGradient.type === "linear") {
-        gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">`;
-        if (fillGradient.angle === 90) {
-          gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">`;
-        } else if (fillGradient.angle === 180) {
-          gradientDef = `<linearGradient id="${gradId}" x1="100%" y1="0%" x2="0%" y2="0%">`;
-        } else if (fillGradient.angle === 270) {
-          gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="100%" x2="0%" y2="0%">`;
-        } else {
-          gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">`;
-        }
+        // Математически корректный расчёт x1/y1/x2/y2 из угла
+        const angleRad = (fillGradient.angle * Math.PI) / 180;
+        const cosA = Math.cos(angleRad);
+        const sinA = Math.sin(angleRad);
+        // Нормализуем: вектор (cosA, sinA) определяет направление градиента
+        // Переводим в проценты: центр (50%, 50%), радиус 50%
+        const x1 = 50 - 50 * cosA;
+        const y1 = 50 - 50 * sinA;
+        const x2 = 50 + 50 * cosA;
+        const y2 = 50 + 50 * sinA;
+        gradientDef = `<linearGradient id="${gradId}" x1="${x1.toFixed(2)}%" y1="${y1.toFixed(2)}%" x2="${x2.toFixed(2)}%" y2="${y2.toFixed(2)}%">`;
         gradientDef += `<stop offset="0%" stop-color="${fillGradient.color1}"/>`;
         gradientDef += `<stop offset="100%" stop-color="${fillGradient.color2}"/>`;
         gradientDef += `</linearGradient>`;
@@ -2239,159 +2057,9 @@ function exportPNG() {
   tempCtx.scale(scaleFactor, scaleFactor);
   tempCtx.translate(Math.round(offsetX), Math.round(offsetY));
 
-  // Рисуем все пути с заливкой
+  // Рисуем все пути через единый рендер (с округлением для чётких пикселей)
   state.paths.forEach((path) => {
-    const pathThickness = path.thickness || state.thickness;
-    const pathColor = path.color || state.color;
-
-    // Получаем параметры заливки
-    const fillType =
-      path.tool === "rectangle" || path.tool === "circle"
-        ? path.fillType || state.fillType
-        : "none";
-    const fillColor = path.fillColor || state.fillColor;
-    const fillGradient = path.fillGradient || state.fillGradient;
-
-    // Сначала рисуем заливку
-    if (fillType !== "none") {
-      if (fillType === "solid") {
-        tempCtx.fillStyle = fillColor;
-      } else if (fillType === "gradient") {
-        let gradient;
-        if (path.tool === "circle") {
-          const center = path.points[0];
-          const radiusPoint = path.points[1];
-          const radius = Math.hypot(
-            radiusPoint.x - center.x,
-            radiusPoint.y - center.y,
-          );
-          gradient = tempCtx.createRadialGradient(
-            center.x,
-            center.y,
-            0,
-            center.x,
-            center.y,
-            radius,
-          );
-          gradient.addColorStop(0, fillGradient.color1);
-          gradient.addColorStop(1, fillGradient.color2);
-        } else {
-          const bounds = getPathBounds(path);
-          const centerX = (bounds.minX + bounds.maxX) / 2;
-          const centerY = (bounds.minY + bounds.maxY) / 2;
-          const radius =
-            Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
-
-          if (fillGradient.type === "linear") {
-            const angleRad = (fillGradient.angle * Math.PI) / 180;
-            const x1 = centerX - Math.cos(angleRad) * radius;
-            const y1 = centerY - Math.sin(angleRad) * radius;
-            const x2 = centerX + Math.cos(angleRad) * radius;
-            const y2 = centerY + Math.sin(angleRad) * radius;
-            gradient = tempCtx.createLinearGradient(x1, y1, x2, y2);
-          } else {
-            gradient = tempCtx.createRadialGradient(
-              centerX,
-              centerY,
-              0,
-              centerX,
-              centerY,
-              radius,
-            );
-          }
-          gradient.addColorStop(0, fillGradient.color1);
-          gradient.addColorStop(1, fillGradient.color2);
-        }
-        tempCtx.fillStyle = gradient;
-      }
-
-      tempCtx.beginPath();
-
-      if (path.tool === "rectangle" && path.points.length === 4) {
-        const roundedPoints = path.points.map((p) => ({
-          x: Math.round(p.x),
-          y: Math.round(p.y),
-        }));
-        tempCtx.moveTo(roundedPoints[0].x, roundedPoints[0].y);
-        for (let i = 1; i < 4; i++) {
-          tempCtx.lineTo(roundedPoints[i].x, roundedPoints[i].y);
-        }
-        tempCtx.closePath();
-        tempCtx.fill();
-      } else if (path.tool === "circle" && path.points.length === 2) {
-        const cx = Math.round(path.points[0].x);
-        const cy = Math.round(path.points[0].y);
-        const radiusPoint = path.points[1];
-        const radius = Math.hypot(
-          radiusPoint.x - path.points[0].x,
-          radiusPoint.y - path.points[0].y,
-        );
-        tempCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-        tempCtx.fill();
-      }
-    }
-
-    // Затем рисуем обводку
-    tempCtx.beginPath();
-    tempCtx.strokeStyle = pathColor;
-    tempCtx.lineWidth = pathThickness;
-    tempCtx.lineCap = "round";
-    tempCtx.lineJoin = "round";
-
-    if (path.tool === "line" && path.points.length === 2) {
-      const x1 = Math.round(path.points[0].x);
-      const y1 = Math.round(path.points[0].y);
-      const x2 = Math.round(path.points[1].x);
-      const y2 = Math.round(path.points[1].y);
-      tempCtx.moveTo(x1, y1);
-      tempCtx.lineTo(x2, y2);
-    } else if (path.tool === "rectangle" && path.points.length === 4) {
-      const roundedPoints = path.points.map((p) => ({
-        x: Math.round(p.x),
-        y: Math.round(p.y),
-      }));
-      tempCtx.moveTo(roundedPoints[0].x, roundedPoints[0].y);
-      for (let i = 1; i < 4; i++) {
-        tempCtx.lineTo(roundedPoints[i].x, roundedPoints[i].y);
-      }
-      tempCtx.closePath();
-    } else if (path.tool === "circle" && path.points.length === 2) {
-      const cx = Math.round(path.points[0].x);
-      const cy = Math.round(path.points[0].y);
-      const radiusPoint = path.points[1];
-      const radius = Math.hypot(
-        radiusPoint.x - path.points[0].x,
-        radiusPoint.y - path.points[0].y,
-      );
-      tempCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-    } else if (path.tool === "curve" && path.points.length === 4) {
-      const p0 = path.points[0];
-      const p1 = path.points[1];
-      const p2 = path.points[2];
-      const p3 = path.points[3];
-      tempCtx.moveTo(Math.round(p0.x), Math.round(p0.y));
-      tempCtx.bezierCurveTo(
-        Math.round(p1.x),
-        Math.round(p1.y),
-        Math.round(p2.x),
-        Math.round(p2.y),
-        Math.round(p3.x),
-        Math.round(p3.y),
-      );
-    } else if (path.tool === "curve" && path.points.length === 3) {
-      const p0 = path.points[0];
-      const p1 = path.points[1];
-      const p2 = path.points[2];
-      tempCtx.moveTo(Math.round(p0.x), Math.round(p0.y));
-      tempCtx.quadraticCurveTo(
-        Math.round(p1.x),
-        Math.round(p1.y),
-        Math.round(p2.x),
-        Math.round(p2.y),
-      );
-    }
-
-    tempCtx.stroke();
+    renderShape(tempCtx, path, true);
   });
 
   tempCtx.restore();
@@ -2425,12 +2093,12 @@ function onKeyDown(e) {
     state.showHandles = false;
     saveState(); // <-- ВАЖНО: сохраняем после удаления
     draw();
-  } else if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+  } else if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
     e.preventDefault();
-    undo(); // <-- Должно работать
-  } else if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+    undo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
     e.preventDefault();
-    redo(); // Для полноты
+    redo();
   }
 }
 
@@ -3322,17 +2990,7 @@ function exportPNGWithSize(size, filename) {
   tempCtx.translate(offsetX, offsetY);
 
   state.paths.forEach((path) => {
-    const thickness = path.thickness || state.thickness;
-    const color = path.color || state.color;
-
-    tempCtx.strokeStyle = color;
-    tempCtx.lineWidth = thickness;
-    tempCtx.lineCap = "round";
-    tempCtx.lineJoin = "round";
-
-    tempCtx.beginPath();
-    drawPath(tempCtx, path);
-    tempCtx.stroke();
+    renderShape(tempCtx, path);
   });
 
   tempCtx.restore();
@@ -3408,16 +3066,14 @@ function generateSVGString() {
 
       let gradientDef = "";
       if (fillGradient.type === "linear") {
-        gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">`;
-        if (fillGradient.angle === 90) {
-          gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">`;
-        } else if (fillGradient.angle === 180) {
-          gradientDef = `<linearGradient id="${gradId}" x1="100%" y1="0%" x2="0%" y2="0%">`;
-        } else if (fillGradient.angle === 270) {
-          gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="100%" x2="0%" y2="0%">`;
-        } else {
-          gradientDef = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">`;
-        }
+        const angleRad = (fillGradient.angle * Math.PI) / 180;
+        const cosA = Math.cos(angleRad);
+        const sinA = Math.sin(angleRad);
+        const x1 = 50 - 50 * cosA;
+        const y1 = 50 - 50 * sinA;
+        const x2 = 50 + 50 * cosA;
+        const y2 = 50 + 50 * sinA;
+        gradientDef = `<linearGradient id="${gradId}" x1="${x1.toFixed(2)}%" y1="${y1.toFixed(2)}%" x2="${x2.toFixed(2)}%" y2="${y2.toFixed(2)}%">`;
         gradientDef += `<stop offset="0%" stop-color="${fillGradient.color1}"/>`;
         gradientDef += `<stop offset="100%" stop-color="${fillGradient.color2}"/>`;
         gradientDef += `</linearGradient>`;
@@ -3508,18 +3164,7 @@ function generatePNGDataURL(targetSize) {
     tempCtx.scale(scale, scale);
 
     state.paths.forEach((path) => {
-      const thickness = path.thickness || state.thickness;
-      const color = path.color || state.color;
-
-      tempCtx.strokeStyle = color;
-      tempCtx.lineWidth = thickness;
-      tempCtx.lineCap = "round";
-      tempCtx.lineJoin = "round";
-      tempCtx.fillStyle = "none";
-
-      tempCtx.beginPath();
-      drawPath(tempCtx, path);
-      tempCtx.stroke();
+      renderShape(tempCtx, path);
     });
 
     tempCtx.restore();
