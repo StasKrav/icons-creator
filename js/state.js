@@ -40,14 +40,27 @@ const state = {
 };
 
 // ========== ПРЕСЕТЫ ИКОНОК ==========
+// Все значения толщины — в канвас-пикселях (канвас 512×512).
+// realMin / realMax — в реальных пикселях целевого размера иконки.
+// Сетка не привязана к режиму — пользователь выбирает её сам.
 const iconPresets = {
-  favicon:     { targetSize: 16,  gridSize: 32,  blocksX: 16,  blocksY: 16,  minThickness: 32,  description: "Favicon (16×16)" },
-  menu32:      { targetSize: 32,  gridSize: 16,  blocksX: 32,  blocksY: 32,  minThickness: 16,  description: "Меню (32×32)" },
-  standard64:  { targetSize: 64,  gridSize: 8,   blocksX: 64,  blocksY: 64,  minThickness: 8,   description: "Стандартная (64×64)" },
-  high128:     { targetSize: 128, gridSize: 4,   blocksX: 128, blocksY: 128, minThickness: 4,   description: "Высокое разрешение (128×128)" },
-  ultra256:    { targetSize: 256, gridSize: 2,   blocksX: 256, blocksY: 256, minThickness: 2,   description: "Ультра HD (256×256)" },
-  full512:     { targetSize: 512, gridSize: 1,   blocksX: 512, blocksY: 512, minThickness: 1,   description: "Полное разрешение (512×512)" },
+  favicon:     { targetSize: 16,  blocksX: 16,  blocksY: 16,  minThickness: 32,  maxThickness: 192, realMin: 0, realMax: 6,  description: "Favicon (16×16)" },
+  menu32:      { targetSize: 32,  blocksX: 32,  blocksY: 32,  minThickness: 16,  maxThickness: 128, realMin: 0, realMax: 8,  description: "Меню (32×32)" },
+  standard64:  { targetSize: 64,  blocksX: 64,  blocksY: 64,  minThickness: 8,   maxThickness: 80,  realMin: 0, realMax: 10, description: "Стандартная (64×64)" },
+  high128:     { targetSize: 128, blocksX: 128, blocksY: 128, minThickness: 4,   maxThickness: 48,  realMin: 0, realMax: 12, description: "Высокое разрешение (128×128)" },
+  ultra256:    { targetSize: 256, blocksX: 256, blocksY: 256, minThickness: 2,   maxThickness: 32,  realMin: 0, realMax: 16, description: "Ультра HD (256×256)" },
+  full512:     { targetSize: 512, blocksX: 512, blocksY: 512, minThickness: 1,   maxThickness: 20,  realMin: 0, realMax: 20, description: "Полное разрешение (512×512)" },
 };
+
+// Пересчёт реальных пикселей → канвас-пиксели (канвас всегда 512×512)
+function realToCanvas(realPx, targetSize) {
+  return Math.round(realPx * (512 / targetSize));
+}
+
+// Пересчёт канвас-пикселей → реальные пиксели
+function canvasToReal(canvasPx, targetSize) {
+  return canvasPx / (512 / targetSize);
+}
 
 // ========== ИСТОРИЯ ДЕЙСТВИЙ ==========
 function initHistory() {

@@ -15,33 +15,44 @@ function setIconMode(mode) {
   const preset = iconPresets[mode];
   if (!preset) return;
 
-  state.gridSize = preset.gridSize;
-  if (gridSize) gridSize.value = preset.gridSize;
+  // Сетка не привязана к режиму иконки — пользователь выбирает её сам
 
   if (thickness) {
-    thickness.min = preset.minThickness;
-    if (state.thickness < preset.minThickness) {
-      state.thickness = preset.minThickness;
-      thickness.value = preset.minThickness;
-      if (thickVal) thickVal.textContent = preset.minThickness;
-    }
+    // Ползунок работает в реальных пикселях целевого размера
+    thickness.min = preset.realMin;
+    thickness.max = preset.realMax;
+    thickness.step = 1;
+
+    // Пересчитываем текущую толщину под новый режим
+    const currentReal = canvasToReal(state.thickness, preset.targetSize);
+    let newReal = Math.round(currentReal);
+
+    // Если реальная толщина оказалась 0 — ставим 1 (минимальная видимая линия)
+    if (newReal === 0) newReal = 1;
+
+    if (newReal > preset.realMax) newReal = preset.realMax;
+
+    const newCanvas = realToCanvas(newReal, preset.targetSize);
+    state.thickness = newCanvas;
+    thickness.value = newReal;
+    if (thickVal) thickVal.textContent = newReal;
   }
 
   state.snap = true;
   if (snap) snap.checked = true;
   if (gridBtn) gridBtn.classList.add("active");
 
-  const modeInfo = document.getElementById("modeInfo");
-  if (modeInfo) {
-    modeInfo.innerHTML = `Блоков: ${preset.blocksX}×${preset.blocksY} | Мин. толщина: ${preset.minThickness}px<br>Целевой размер: ${preset.targetSize}×${preset.targetSize}px`;
-  }
-
   draw();
 }
 
 // ========== ОБНОВЛЕНИЕ UI ИЗ СОСТОЯНИЯ ==========
 function updateUI() {
-  thickVal.textContent = state.thickness;
+  // Показываем толщину в реальных пикселях
+  const iconMode = document.getElementById("iconMode");
+  const preset = iconMode && iconMode.value ? iconPresets[iconMode.value] : null;
+  const targetSize = preset ? preset.targetSize : 512;
+  thickVal.textContent = Math.round(canvasToReal(state.thickness, targetSize));
+
   gridBtn.classList.toggle("active", state.snap);
   if (colorPreview) colorPreview.style.background = state.color;
 }
@@ -49,11 +60,17 @@ function updateUI() {
 function updatePanelFromSelected() {
   if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
     const selectedPath = state.paths[state.selectedPathIdx];
-    const pathThickness = selectedPath.thickness || state.thickness;
+    const pathThickness = selectedPath.thickness !== undefined ? selectedPath.thickness : state.thickness;
     const pathColor = selectedPath.color || state.color;
 
-    thickness.value = pathThickness;
-    thickVal.textContent = pathThickness;
+    // Пересчитываем канвас-пиксели в реальные для отображения
+    const iconMode = document.getElementById("iconMode");
+    const preset = iconMode && iconMode.value ? iconPresets[iconMode.value] : null;
+    const targetSize = preset ? preset.targetSize : 512;
+    const realPx = Math.round(canvasToReal(pathThickness, targetSize));
+
+    thickness.value = realPx;
+    thickVal.textContent = realPx;
     state.thickness = pathThickness;
 
     color.value = pathColor;
@@ -165,12 +182,14 @@ function init() {
   canvas.addEventListener("mouseup", onMouseUp);
   document.addEventListener("keydown", onKeyDown);
 
-  state.gridSize = 32;
-  if (document.getElementById("gridSize")) {
-    document.getElementById("gridSize").value = 32;
+  // Синхронизируем ползунок с выбранным режимом иконки при загрузке
+  const iconModeSelect = document.getElementById("iconMode");
+  if (iconModeSelect && iconModeSelect.value) {
+    setIconMode(iconModeSelect.value);
+  } else {
+    updateUI();
   }
 
-  updateUI();
   draw();
   initHistory();
 }
@@ -202,11 +221,19 @@ if (color) {
 
 if (thickness) {
   thickness.oninput = (e) => {
-    const newThickness = +e.target.value;
-    state.thickness = newThickness;
-    thickVal.textContent = newThickness;
+    const realPx = +e.target.value;
+    thickVal.textContent = realPx;
+
+    // Определяем текущий режим иконки для пересчёта
+    const iconMode = document.getElementById("iconMode");
+    const preset = iconMode && iconMode.value ? iconPresets[iconMode.value] : null;
+    const targetSize = preset ? preset.targetSize : 512;
+
+    const canvasPx = realToCanvas(realPx, targetSize);
+    state.thickness = canvasPx;
+
     if (state.selectedPathIdx !== -1 && state.paths[state.selectedPathIdx]) {
-      state.paths[state.selectedPathIdx].thickness = newThickness;
+      state.paths[state.selectedPathIdx].thickness = canvasPx;
       saveState();
     }
     draw();
