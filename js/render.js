@@ -285,8 +285,6 @@ function drawHandles(ctx, path, idx) {
 
 // ========== ПРИЗРАЧНЫЙ КОНТУР ==========
 function drawGhostOutline(ctx, path) {
-  if (path.tool !== "rectangle" && path.tool !== "circle") return;
-
   ctx.save();
   ctx.strokeStyle = "#3b82f6";
   ctx.lineWidth = 1.5;
@@ -408,11 +406,14 @@ function draw() {
     }
   });
 
-  // Призрачные контуры для невидимых фигур
+  // Призрачные контуры
+  // — для выбранной фигуры (сразу после создания видно границы)
+  // — для фигур без видимого представления (толщина 0 и нет заливки)
   if (state.ghostStroke !== false) {
     state.paths.forEach((path, idx) => {
-      if (idx === state.selectedPathIdx) return;
-      if (!hasVisibleAppearance(path)) {
+      const isSelected = idx === state.selectedPathIdx;
+      const isInvisible = !hasVisibleAppearance(path);
+      if (isSelected || isInvisible) {
         drawGhostOutline(ctx, path);
       }
     });
