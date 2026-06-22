@@ -137,7 +137,30 @@ function updateGridUI() {
 }
 
 // ========== КЛАВИАТУРА ==========
+const toolHotkeys = {
+  v: "select", V: "select",
+  r: "rectangle", R: "rectangle",
+  c: "circle", C: "circle",
+  l: "line", L: "line",
+  b: "curve", B: "curve",
+  e: "erase", E: "erase",
+};
+
 function onKeyDown(e) {
+  // Горячие клавиши переключения инструментов
+  const tool = toolHotkeys[e.key];
+  if (tool && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    state.tool = tool;
+    state.selectedPathIdx = -1;
+    state.showHandles = tool === "curve";
+    document.querySelectorAll("[data-tool]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tool === tool);
+    });
+    draw();
+    return;
+  }
+
   if (e.key === "g" || e.key === "G") {
     state.snap = !state.snap;
     snap.checked = state.snap;
