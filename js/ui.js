@@ -545,6 +545,62 @@ if (iconModeSelect) {
   iconModeSelect.onchange = () => setIconMode(iconModeSelect.value);
 }
 
+// ========== МЕНЮ ПРИЛОЖЕНИЯ ==========
+// Иконки для пунктов меню (SVG-строки)
+var MENU_ICON_NEW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+var MENU_ICON_SAVE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
+var MENU_ICON_THEME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
+var MENU_ICON_ABOUT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>';
+
+// Структура пунктов меню. Легко добавлять новые:
+// { id, label, icon, divider (опционально), action }
+const appMenuItems = [
+  { id: "new", label: "Создать", icon: MENU_ICON_NEW, action: function() { if (confirm("Очистить канвас?")) clearCanvas(); } },
+  { id: "save", label: "Сохранить", icon: MENU_ICON_SAVE, action: function() { exportSVG(); } },
+  { divider: true },
+  { id: "theme", label: "Тема", icon: MENU_ICON_THEME, action: function() { document.body.style.background = document.body.style.background === "#0f172a" ? "#f1f5f9" : "#0f172a"; } },
+  { divider: true },
+  { id: "about", label: "О приложении", icon: MENU_ICON_ABOUT, action: function() { alert("ICONS CREATOR \u2014 векторный редактор иконок\nВерсия 2.0\nCanvas 2D \u2022 SVG/PNG экспорт"); } },
+];
+
+function initAppMenu() {
+  const btn = document.getElementById("appMenuBtn");
+  const dropdown = document.getElementById("appMenuDropdown");
+  if (!btn || !dropdown) return;
+
+  // Строим пункты меню из данных
+  appMenuItems.forEach((item) => {
+    if (item.divider) {
+      const divider = document.createElement("div");
+      divider.className = "app-menu-divider";
+      dropdown.appendChild(divider);
+      return;
+    }
+    const el = document.createElement("button");
+    el.className = "app-menu-item";
+    el.innerHTML = item.icon + `<span>${item.label}</span>`;
+    el.onclick = (e) => {
+      e.stopPropagation();
+      dropdown.classList.remove("open");
+      item.action();
+    };
+    dropdown.appendChild(el);
+  });
+
+  // Открытие/закрытие по кнопке
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle("open");
+  };
+
+  // Закрытие по клику вне меню
+  document.addEventListener("click", () => {
+    dropdown.classList.remove("open");
+  });
+}
+
+initAppMenu();
+
 // ========== ЗАПУСК ==========
 init();
 console.log("Векторный редактор инициализирован");

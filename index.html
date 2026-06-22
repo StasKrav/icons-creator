@@ -60,6 +60,25 @@
                 <path d="M32.5,224.5 L32.5,256.5" stroke="currentColor" stroke-width="13" fill="none" stroke-linecap="round"/>
                 </svg>
             </button>
+            <!-- РАЗДЕЛИТЕЛЬ -->
+            <div style="flex: 1;"></div>
+
+            <!-- КНОПКА НАСТРОЕК ПРИЛОЖЕНИЯ -->
+            <div class="app-menu-container">
+                <button class="tool-btn" id="appMenuBtn" title="Меню приложения">
+                    <svg width="448" height="480" viewBox="0 0 448 480" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="112" cy="112" r="32" stroke="currentColor" stroke-width="24" fill="none"/>
+                    <path d="M208,112 L368,112" stroke="currentColor" stroke-width="24" fill="none" stroke-linecap="round"/>
+                    <path d="M80,240 L240,240" stroke="currentColor" stroke-width="24" fill="none" stroke-linecap="round"/>
+                    <circle cx="336" cy="240" r="32" stroke="currentColor" stroke-width="24" fill="none"/>
+                    <circle cx="112" cy="368" r="32" stroke="currentColor" stroke-width="24" fill="none"/>
+                    <path d="M208,368 L368,368" stroke="currentColor" stroke-width="24" fill="none" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <div class="app-menu-dropdown" id="appMenuDropdown">
+                    <!-- Пункты меню генерируются из JS -->
+                </div>
+            </div>
         </div>
 
         <!-- ЦЕНТР: Канвас -->
@@ -294,11 +313,6 @@
                     <h3>Импорт</h3>
                     <div class="action-buttons">
                         <button class="action-btn" id="importSVGBtn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-                                <polyline points="8 12 12 16 16 12"/>
-                                <line x1="12" y1="2" x2="12" y2="16"/>
-                            </svg>
                             Импорт SVG
                         </button>
                         <input type="file" id="svgFileInput" accept=".svg" style="display: none;">
