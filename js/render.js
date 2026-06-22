@@ -4,6 +4,11 @@ function buildShapePath(ctx, path, roundCoords = false) {
 
   ctx.beginPath();
 
+  if (path.tool === "path") {
+    buildPathSegments(ctx, path.segments, path.closed, r, path.startPoint);
+    return;
+  }
+
   if (path.tool === "curve" && path.points.length === 4) {
     ctx.moveTo(r(path.points[0].x), r(path.points[0].y));
     ctx.bezierCurveTo(
@@ -33,6 +38,32 @@ function buildShapePath(ctx, path, roundCoords = false) {
   }
 }
 
+// Строит контур из сегментов path
+// startPoint — начальная точка контура (не хранится в сегментах)
+function buildPathSegments(ctx, segments, closed, r, startPoint) {
+  if (segments.length === 0) return;
+
+  // Если startPoint не передан, используем первый сегмент как начальную точку
+  const start = startPoint || (segments.length > 0 ? { x: segments[0].x, y: segments[0].y } : null);
+  if (!start) return;
+
+  let prevPoint = start;
+
+  for (const seg of segments) {
+    if (seg.type === "line") {
+      ctx.lineTo(r(seg.x), r(seg.y));
+      prevPoint = { x: seg.x, y: seg.y };
+    } else if (seg.type === "curve") {
+      ctx.bezierCurveTo(r(seg.c1.x), r(seg.c1.y), r(seg.c2.x), r(seg.c2.y), r(seg.x), r(seg.y));
+      prevPoint = { x: seg.x, y: seg.y };
+    }
+  }
+
+  if (closed) {
+    ctx.closePath();
+  }
+}
+
 // ========== ЕДИНАЯ ФУНКЦИЯ РЕНДЕРА ФИГУРЫ (заливка + обводка) ==========
 function renderShape(ctx, path, roundCoords = false) {
   const fillType = path.fillType || state.fillType;
@@ -41,8 +72,8 @@ function renderShape(ctx, path, roundCoords = false) {
   const pathColor = path.color || state.color;
   const pathThickness = path.thickness !== undefined ? path.thickness : state.thickness;
 
-  // Заливка (только для rectangle и circle)
-  if (fillType !== "none" && (path.tool === "rectangle" || path.tool === "circle")) {
+  // Заливка (для rectangle, circle и path)
+  if (fillType !== "none" && (path.tool === "rectangle" || path.tool === "circle" || path.tool === "path")) {
     ctx.save();
 
     if (fillType === "solid") {
@@ -361,9 +392,9 @@ function draw() {
   // Ручки и точки
   state.paths.forEach((path, idx) => {
     const shouldShowHandles =
-      (state.tool === "curve" || state.tool === "select") &&
+      (state.tool === "curve" || state.tool === "select" || state.tool === "path") &&
       (idx === state.selectedPathIdx || idx === state.hoveredPathIdx) &&
-      path.tool === "curve";
+      (path.tool === "curve" || path.tool === "path");
 
     if (shouldShowHandles) {
       if (path.tool === "curve" && path.points.length === 4) {
@@ -387,22 +418,41 @@ function draw() {
         ctx.lineTo(handle.x, handle.y);
         ctx.lineTo(path.points[2].x, path.points[2].y);
         ctx.stroke();
+      } else if (path.tool === "path") {
+        drawPathHandles(ctx, path, idx);
       }
     }
   });
 
   // Точки для выбранного пути
   state.paths.forEach((path, idx) => {
-    if (state.tool === "select" && idx === state.selectedPathIdx) {
+    if ((state.tool === "select" || state.tool === "path") && idx === state.selectedPathIdx) {
       ctx.fillStyle = "rgba(66, 133, 244, 0.9)";
       ctx.strokeStyle = "#4285F4";
       ctx.lineWidth = 2;
-      path.points.forEach((point) => {
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      });
+
+      if (path.tool === "path") {
+        // Для path-объектов рисуем начальную точку и точки сочленения сегментов
+        if (path.startPoint) {
+          ctx.beginPath();
+          ctx.arc(path.startPoint.x, path.startPoint.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        path.segments.forEach((seg) => {
+          ctx.beginPath();
+          ctx.arc(seg.x, seg.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+      } else if (path.points) {
+        path.points.forEach((point) => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+      }
     }
   });
 
@@ -418,10 +468,123 @@ function draw() {
       }
     });
   }
+
+  // Зелёная точка начала контура при построении path
+  if (state.tool === "path" && state.isPathBuilding && state.pathStartPoint && state.pathSegments.length > 0) {
+    ctx.save();
+    ctx.fillStyle = "rgba(0, 200, 0, 0.5)";
+    ctx.strokeStyle = "rgba(0, 150, 0, 0.8)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(state.pathStartPoint.x, state.pathStartPoint.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function hasVisibleAppearance(path) {
   const fillType = path.fillType !== undefined ? path.fillType : state.fillType;
   const thickness = path.thickness !== undefined ? path.thickness : state.thickness;
   return fillType !== "none" || thickness > 0;
+}
+
+// ========== РУЧКИ ДЛЯ PATH (СОСТАВНОЙ КОНТУР) ==========
+function drawPathHandles(ctx, path, idx) {
+  if (path.tool !== "path") return;
+
+  const pathColor = path.color || state.color;
+  const pathThickness = path.thickness || state.thickness;
+  const pointSize = Math.max(4, Math.min(6, Math.floor(pathThickness / 2)));
+  const handleSize = Math.max(5, pointSize + 1);
+
+  ctx.save();
+
+  // Рисуем начальную точку (startPoint)
+  if (path.startPoint) {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(path.startPoint.x, path.startPoint.y, pointSize + 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = pathColor;
+    ctx.beginPath();
+    ctx.arc(path.startPoint.x, path.startPoint.y, pointSize, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Рисуем ручки для curve-сегментов и точки сочленения
+  let prevPoint = path.startPoint || null;
+  for (let j = 0; j < path.segments.length; j++) {
+    const seg = path.segments[j];
+
+    // Точка сочленения (конец сегмента)
+    const isDraggingPoint = state.isDragging && state.dragType === "point" && state.dragData?.pathIdx === idx && state.dragData?.pointIdx === j;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(seg.x, seg.y, pointSize + 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = isDraggingPoint ? "#ff6600" : pathColor;
+    ctx.beginPath();
+    ctx.arc(seg.x, seg.y, pointSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Если это curve-сегмент — рисуем ручки
+    if (seg.type === "curve") {
+      const isDraggingC1 = state.isDragging && state.dragType === "handle" && state.dragData?.pathIdx === idx && state.dragData?.segIdx === j && state.dragData?.handleType === "c1";
+      const isDraggingC2 = state.isDragging && state.dragType === "handle" && state.dragData?.pathIdx === idx && state.dragData?.segIdx === j && state.dragData?.handleType === "c2";
+
+      // Вспомогательные линии к ручкам
+      ctx.strokeStyle = "rgba(100, 100, 100, 0.5)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+
+      if (prevPoint) {
+        ctx.beginPath();
+        ctx.moveTo(prevPoint.x, prevPoint.y);
+        ctx.lineTo(seg.c1.x, seg.c1.y);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(seg.x, seg.y);
+      ctx.lineTo(seg.c2.x, seg.c2.y);
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+
+      // Ручка c1
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(seg.c1.x, seg.c1.y, handleSize + 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = isDraggingC1 ? "#ff6600" : "#ff6600";
+      ctx.beginPath();
+      ctx.arc(seg.c1.x, seg.c1.y, handleSize + 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(seg.c1.x, seg.c1.y, Math.max(2, handleSize / 2), 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ручка c2
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(seg.c2.x, seg.c2.y, handleSize + 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = isDraggingC2 ? "#ff6600" : "#ff6600";
+      ctx.beginPath();
+      ctx.arc(seg.c2.x, seg.c2.y, handleSize + 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(seg.c2.x, seg.c2.y, Math.max(2, handleSize / 2), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    prevPoint = { x: seg.x, y: seg.y };
+  }
+
+  ctx.restore();
 }

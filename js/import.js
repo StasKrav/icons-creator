@@ -38,57 +38,142 @@ function parseSVGToPaths(svgString) {
     const commands = d.match(/[MmLlCcQqZz][^MmLlCcQqZz]*/g);
     if (!commands) return;
 
-    let currentPath = null;
-    let lastPoint = null;
+    // Сначала собираем все команды, чтобы определить тип
+    let hasCurve = false;
+    let hasLine = false;
+    let hasMultipleSegments = false;
+    let segmentCount = 0;
 
     for (let cmd of commands) {
       const type = cmd[0];
-      const coords = cmd.slice(1).trim().split(/[\s,]+/).map(Number);
-
-      if (type === "M" || type === "m") {
-        if (currentPath && currentPath.points.length >= 2) paths.push(currentPath);
-        const x = coords[0] * scale + offsetX;
-        const y = coords[1] * scale + offsetY;
-        currentPath = { tool: "curve", points: [{ x, y }], thickness: strokeWidth, color: stroke, fillType: fill !== "none" ? "solid" : "none", fillColor: fill !== "none" ? fill : state.fillColor };
-        lastPoint = { x, y };
-      } else if ((type === "L" || type === "l") && currentPath) {
-        for (let i = 0; i < coords.length; i += 2) {
-          const x = coords[i] * scale + offsetX;
-          const y = coords[i + 1] * scale + offsetY;
-          currentPath.points.push({ x, y });
-          lastPoint = { x, y };
-        }
-      } else if ((type === "C" || type === "c") && currentPath) {
-        for (let i = 0; i < coords.length; i += 6) {
-          const p1 = { x: coords[i] * scale + offsetX, y: coords[i + 1] * scale + offsetY };
-          const p2 = { x: coords[i + 2] * scale + offsetX, y: coords[i + 3] * scale + offsetY };
-          const p3 = { x: coords[i + 4] * scale + offsetX, y: coords[i + 5] * scale + offsetY };
-          currentPath.points.push(p1, p2, p3);
-          lastPoint = p3;
-        }
-      } else if ((type === "Q" || type === "q") && currentPath) {
-        for (let i = 0; i < coords.length; i += 4) {
-          const p1 = { x: coords[i] * scale + offsetX, y: coords[i + 1] * scale + offsetY };
-          const p2 = { x: coords[i + 2] * scale + offsetX, y: coords[i + 3] * scale + offsetY };
-          currentPath.points.push(p1, p2);
-          lastPoint = p2;
-        }
-      } else if (type === "Z" || type === "z") {
-        if (currentPath && currentPath.points.length > 0 && lastPoint) {
-          currentPath.points.push({ x: currentPath.points[0].x, y: currentPath.points[0].y });
-        }
-      }
+      if (type === "C" || type === "c" || type === "Q" || type === "q") hasCurve = true;
+      if (type === "L" || type === "l") hasLine = true;
+      if (type === "M" || type === "m") segmentCount++;
     }
 
-    if (currentPath && currentPath.points.length >= 2) {
-      if (currentPath.points.length === 4 && Math.abs(currentPath.points[0].x - currentPath.points[3].x) < 5 && Math.abs(currentPath.points[0].y - currentPath.points[3].y) < 5 && currentPath.points[1].x === currentPath.points[0].x) {
-        currentPath.tool = "rectangle";
-      } else if (currentPath.points.length === 2) {
-        currentPath.tool = "line";
-      } else {
-        currentPath.tool = "curve";
+    // Если есть и линии, и кривые, или несколько M — используем path.tool="path"
+    const usePathTool = (hasCurve && hasLine) || segmentCount > 1;
+
+    if (usePathTool) {
+      // Создаём path-объект с сегментами
+      let currentPathObj = null;
+      let startPoint = null;
+      let prevPoint = null;
+      let closed = false;
+
+      for (let cmd of commands) {
+        const type = cmd[0];
+        const coords = cmd.slice(1).trim().split(/[\s,]+/).map(Number);
+
+        if (type === "M" || type === "m") {
+          // Если уже был path — сохраняем его
+          if (currentPathObj && currentPathObj.segments.length > 0) {
+            paths.push(currentPathObj);
+          }
+          const x = coords[0] * scale + offsetX;
+          const y = coords[1] * scale + offsetY;
+          currentPathObj = {
+            tool: "path",
+            segments: [],
+            closed: false,
+            startPoint: { x, y },
+            thickness: strokeWidth,
+            color: stroke,
+            fillType: fill !== "none" ? "solid" : "none",
+            fillColor: fill !== "none" ? fill : state.fillColor,
+            fillGradient: JSON.parse(JSON.stringify(state.fillGradient)),
+          };
+          startPoint = { x, y };
+          prevPoint = { x, y };
+        } else if ((type === "L" || type === "l") && currentPathObj) {
+          for (let i = 0; i < coords.length; i += 2) {
+            const x = coords[i] * scale + offsetX;
+            const y = coords[i + 1] * scale + offsetY;
+            currentPathObj.segments.push({ type: "line", x, y });
+            prevPoint = { x, y };
+          }
+        } else if ((type === "C" || type === "c") && currentPathObj) {
+          for (let i = 0; i < coords.length; i += 6) {
+            const c1 = { x: coords[i] * scale + offsetX, y: coords[i + 1] * scale + offsetY };
+            const c2 = { x: coords[i + 2] * scale + offsetX, y: coords[i + 3] * scale + offsetY };
+            const end = { x: coords[i + 4] * scale + offsetX, y: coords[i + 5] * scale + offsetY };
+            currentPathObj.segments.push({ type: "curve", c1, c2, x: end.x, y: end.y });
+            prevPoint = { x: end.x, y: end.y };
+          }
+        } else if ((type === "Q" || type === "q") && currentPathObj) {
+          for (let i = 0; i < coords.length; i += 4) {
+            const c1 = { x: coords[i] * scale + offsetX, y: coords[i + 1] * scale + offsetY };
+            const end = { x: coords[i + 2] * scale + offsetX, y: coords[i + 3] * scale + offsetY };
+            // Конвертируем квадратичную Безье в кубическую
+            const p0 = prevPoint || startPoint;
+            const cubicC1 = { x: p0.x + (c1.x - p0.x) * 2 / 3, y: p0.y + (c1.y - p0.y) * 2 / 3 };
+            const cubicC2 = { x: end.x + (c1.x - end.x) * 2 / 3, y: end.y + (c1.y - end.y) * 2 / 3 };
+            currentPathObj.segments.push({ type: "curve", c1: cubicC1, c2: cubicC2, x: end.x, y: end.y });
+            prevPoint = { x: end.x, y: end.y };
+          }
+        } else if (type === "Z" || type === "z") {
+          closed = true;
+        }
       }
-      paths.push(currentPath);
+
+      if (currentPathObj && currentPathObj.segments.length > 0) {
+        currentPathObj.closed = closed;
+        paths.push(currentPathObj);
+      }
+    } else {
+      // Старая логика для простых фигур
+      let currentPath = null;
+      let lastPoint = null;
+
+      for (let cmd of commands) {
+        const type = cmd[0];
+        const coords = cmd.slice(1).trim().split(/[\s,]+/).map(Number);
+
+        if (type === "M" || type === "m") {
+          if (currentPath && currentPath.points.length >= 2) paths.push(currentPath);
+          const x = coords[0] * scale + offsetX;
+          const y = coords[1] * scale + offsetY;
+          currentPath = { tool: "curve", points: [{ x, y }], thickness: strokeWidth, color: stroke, fillType: fill !== "none" ? "solid" : "none", fillColor: fill !== "none" ? fill : state.fillColor };
+          lastPoint = { x, y };
+        } else if ((type === "L" || type === "l") && currentPath) {
+          for (let i = 0; i < coords.length; i += 2) {
+            const x = coords[i] * scale + offsetX;
+            const y = coords[i + 1] * scale + offsetY;
+            currentPath.points.push({ x, y });
+            lastPoint = { x, y };
+          }
+        } else if ((type === "C" || type === "c") && currentPath) {
+          for (let i = 0; i < coords.length; i += 6) {
+            const p1 = { x: coords[i] * scale + offsetX, y: coords[i + 1] * scale + offsetY };
+            const p2 = { x: coords[i + 2] * scale + offsetX, y: coords[i + 3] * scale + offsetY };
+            const p3 = { x: coords[i + 4] * scale + offsetX, y: coords[i + 5] * scale + offsetY };
+            currentPath.points.push(p1, p2, p3);
+            lastPoint = p3;
+          }
+        } else if ((type === "Q" || type === "q") && currentPath) {
+          for (let i = 0; i < coords.length; i += 4) {
+            const p1 = { x: coords[i] * scale + offsetX, y: coords[i + 1] * scale + offsetY };
+            const p2 = { x: coords[i + 2] * scale + offsetX, y: coords[i + 3] * scale + offsetY };
+            currentPath.points.push(p1, p2);
+            lastPoint = p2;
+          }
+        } else if (type === "Z" || type === "z") {
+          if (currentPath && currentPath.points.length > 0 && lastPoint) {
+            currentPath.points.push({ x: currentPath.points[0].x, y: currentPath.points[0].y });
+          }
+        }
+      }
+
+      if (currentPath && currentPath.points.length >= 2) {
+        if (currentPath.points.length === 4 && Math.abs(currentPath.points[0].x - currentPath.points[3].x) < 5 && Math.abs(currentPath.points[0].y - currentPath.points[3].y) < 5 && currentPath.points[1].x === currentPath.points[0].x) {
+          currentPath.tool = "rectangle";
+        } else if (currentPath.points.length === 2) {
+          currentPath.tool = "line";
+        } else {
+          currentPath.tool = "curve";
+        }
+        paths.push(currentPath);
+      }
     }
   });
 

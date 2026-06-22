@@ -5,6 +5,19 @@ function exportSVG() {
   state.paths.forEach((path) => {
     const pathThickness = path.thickness || state.thickness;
     const lineOffset = pathThickness / 2;
+
+    if (path.tool === "path") {
+      // Для path-объектов используем getAllPathPoints
+      const allPoints = getAllPathPoints(path);
+      allPoints.forEach((point) => {
+        minX = Math.min(minX, point.x - lineOffset);
+        minY = Math.min(minY, point.y - lineOffset);
+        maxX = Math.max(maxX, point.x + lineOffset);
+        maxY = Math.max(maxY, point.y + lineOffset);
+      });
+      return;
+    }
+
     path.points.forEach((point) => {
       minX = Math.min(minX, point.x - lineOffset);
       minY = Math.min(minY, point.y - lineOffset);
@@ -45,7 +58,7 @@ function exportSVG() {
   state.paths.forEach((path) => {
     const pathThickness = path.thickness || state.thickness;
     const pathColor = path.color || state.color;
-    const fillType = (path.tool === "rectangle" || path.tool === "circle") ? (path.fillType || state.fillType) : "none";
+    const fillType = (path.tool === "rectangle" || path.tool === "circle" || path.tool === "path") ? (path.fillType || state.fillType) : "none";
     const fillColor = path.fillColor || state.fillColor;
     const fillGradient = path.fillGradient || state.fillGradient;
 
@@ -75,7 +88,25 @@ function exportSVG() {
       gradientsDefs += gradientDef;
     }
 
-    if (path.tool === "circle" && path.points.length === 2) {
+    if (path.tool === "path") {
+      // Генерируем path data из сегментов
+      let d = "";
+      const sp = path.startPoint;
+      if (sp) {
+        d += `M${sp.x + offsetX},${sp.y + offsetY} `;
+      }
+      for (const seg of path.segments) {
+        if (seg.type === "line") {
+          d += `L${seg.x + offsetX},${seg.y + offsetY} `;
+        } else if (seg.type === "curve") {
+          d += `C${seg.c1.x + offsetX},${seg.c1.y + offsetY} ${seg.c2.x + offsetX},${seg.c2.y + offsetY} ${seg.x + offsetX},${seg.y + offsetY} `;
+        }
+      }
+      if (path.closed) {
+        d += "Z";
+      }
+      paths += `<path d="${d.trim()}" stroke="${pathColor}" stroke-width="${pathThickness}" ${fillAttr} stroke-linecap="round" stroke-linejoin="round"/>\n`;
+    } else if (path.tool === "circle" && path.points.length === 2) {
       const center = path.points[0];
       const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
       paths += `<circle cx="${center.x + offsetX}" cy="${center.y + offsetY}" r="${radius}" stroke="${pathColor}" stroke-width="${pathThickness}" ${fillAttr}/>\n`;
@@ -105,7 +136,11 @@ function exportPNG() {
   state.paths.forEach((path) => {
     const pathThickness = path.thickness || state.thickness;
     const allPoints = [];
-    if (path.tool === "circle" && path.points.length === 2) {
+
+    if (path.tool === "path") {
+      const pts = getAllPathPoints(path);
+      allPoints.push(...pts);
+    } else if (path.tool === "circle" && path.points.length === 2) {
       const center = path.points[0];
       const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
       allPoints.push({ x: center.x, y: center.y - radius }, { x: center.x, y: center.y + radius }, { x: center.x - radius, y: center.y }, { x: center.x + radius, y: center.y });
@@ -218,6 +253,18 @@ function generateSVGString() {
   state.paths.forEach((path) => {
     const thickness = path.thickness || state.thickness;
     const offset = thickness / 2;
+
+    if (path.tool === "path") {
+      const pts = getAllPathPoints(path);
+      pts.forEach((p) => {
+        minX = Math.min(minX, p.x - offset);
+        minY = Math.min(minY, p.y - offset);
+        maxX = Math.max(maxX, p.x + offset);
+        maxY = Math.max(maxY, p.y + offset);
+      });
+      return;
+    }
+
     if (path.tool === "circle") {
       const center = path.points[0];
       const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
@@ -245,7 +292,7 @@ function generateSVGString() {
   state.paths.forEach((path) => {
     const thickness = path.thickness || state.thickness;
     const color = path.color || state.color;
-    const fillType = (path.tool === "rectangle" || path.tool === "circle") ? (path.fillType || state.fillType) : "none";
+    const fillType = (path.tool === "rectangle" || path.tool === "circle" || path.tool === "path") ? (path.fillType || state.fillType) : "none";
     const fillColor = path.fillColor || state.fillColor;
     const fillGradient = path.fillGradient || state.fillGradient;
 
@@ -275,7 +322,24 @@ function generateSVGString() {
       gradientsDefs += gradientDef;
     }
 
-    if (path.tool === "circle") {
+    if (path.tool === "path") {
+      let d = "";
+      const sp = path.startPoint;
+      if (sp) {
+        d += `M${sp.x + offsetX},${sp.y + offsetY} `;
+      }
+      for (const seg of path.segments) {
+        if (seg.type === "line") {
+          d += `L${seg.x + offsetX},${seg.y + offsetY} `;
+        } else if (seg.type === "curve") {
+          d += `C${seg.c1.x + offsetX},${seg.c1.y + offsetY} ${seg.c2.x + offsetX},${seg.c2.y + offsetY} ${seg.x + offsetX},${seg.y + offsetY} `;
+        }
+      }
+      if (path.closed) {
+        d += "Z";
+      }
+      paths += `<path d="${d.trim()}" stroke="${color}" stroke-width="${thickness}" ${fillAttr} stroke-linecap="round" stroke-linejoin="round"/>\n`;
+    } else if (path.tool === "circle") {
       const center = path.points[0];
       const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
       paths += `<circle cx="${center.x + offsetX}" cy="${center.y + offsetY}" r="${radius}" stroke="${color}" stroke-width="${thickness}" ${fillAttr} stroke-linecap="round"/>\n`;
@@ -340,6 +404,18 @@ function exportPNGWithSize(size, filename) {
   state.paths.forEach((path) => {
     const thickness = path.thickness || state.thickness;
     const offset = thickness / 2;
+
+    if (path.tool === "path") {
+      const pts = getAllPathPoints(path);
+      pts.forEach((p) => {
+        minX = Math.min(minX, p.x - offset);
+        minY = Math.min(minY, p.y - offset);
+        maxX = Math.max(maxX, p.x + offset);
+        maxY = Math.max(maxY, p.y + offset);
+      });
+      return;
+    }
+
     if (path.tool === "circle") {
       const center = path.points[0];
       const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
@@ -476,7 +552,25 @@ async function exportSprite() {
     const color = path.color || state.color;
     let pathData = "";
 
-    if (path.tool === "circle") {
+    if (path.tool === "path") {
+      let d = "";
+      const sp = path.startPoint;
+      if (sp) {
+        d += `M${sp.x},${sp.y} `;
+      }
+      for (const seg of path.segments) {
+        if (seg.type === "line") {
+          d += `L${seg.x},${seg.y} `;
+        } else if (seg.type === "curve") {
+          d += `C${seg.c1.x},${seg.c1.y} ${seg.c2.x},${seg.c2.y} ${seg.x},${seg.y} `;
+        }
+      }
+      if (path.closed) {
+        d += "Z";
+      }
+      const fillAttr = path.fillType && path.fillType !== "none" ? `fill="${path.fillColor || state.fillColor}"` : 'fill="none"';
+      pathData = `<path d="${d.trim()}" stroke="${color}" stroke-width="${thickness}" ${fillAttr} stroke-linecap="round" stroke-linejoin="round"/>`;
+    } else if (path.tool === "circle") {
       const center = path.points[0];
       const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
       pathData = `<circle cx="${center.x}" cy="${center.y}" r="${radius}" stroke="${color}" stroke-width="${thickness}" fill="none"/>`;

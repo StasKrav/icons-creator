@@ -37,6 +37,12 @@ const state = {
       angle: 90,
     },
   },
+  // ========== PATH (СОСТАВНОЙ КОНТУР) ==========
+  pathSegments: [],          // временные сегменты при построении контура
+  pathStartPoint: null,      // первая точка (для определения замыкания)
+  isPathBuilding: false,     // идёт ли построение контура
+  pathCurveStart: null,      // начальная точка текущей кривой (при Shift+click = начало curve-сегмента)
+  pathCurveEnd: null,        // конечная точка текущей кривой (обновляется при drag)
 };
 
 // ========== ПРЕСЕТЫ ИКОНОК ==========
@@ -131,6 +137,17 @@ function redo() {
 function getPathBounds(path) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
+  if (path.tool === "path") {
+    const points = getAllPathPoints(path);
+    points.forEach((p) => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+    return { minX, minY, maxX, maxY };
+  }
+
   if (path.tool === "circle" && path.points.length === 2) {
     const center = path.points[0];
     const radius = Math.hypot(path.points[1].x - center.x, path.points[1].y - center.y);
@@ -150,6 +167,13 @@ function getPathBounds(path) {
 }
 
 function getPathCenter(path) {
+  if (path.tool === "path") {
+    const points = getAllPathPoints(path);
+    if (points.length === 0) return { x: 0, y: 0 };
+    const sumX = points.reduce((sum, p) => sum + p.x, 0);
+    const sumY = points.reduce((sum, p) => sum + p.y, 0);
+    return { x: sumX / points.length, y: sumY / points.length };
+  }
   if (path.tool === "circle" && path.points.length === 2) return path.points[0];
   const sumX = path.points.reduce((sum, p) => sum + p.x, 0);
   const sumY = path.points.reduce((sum, p) => sum + p.y, 0);
@@ -168,4 +192,72 @@ function getPointOnCurve(p0, p1, p2, t) {
     x: (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x,
     y: (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y,
   };
+}
+
+// ========== PATH (СОСТАВНОЙ КОНТУР) ==========
+
+// Создаёт новый пустой path-объект
+function createPathObject(startPoint) {
+  return {
+    tool: "path",
+    segments: [],                    // массив сегментов
+    closed: false,                   // замкнут ли контур
+    startPoint: { x: startPoint.x, y: startPoint.y }, // начальная точка контура
+    thickness: state.thickness,
+    color: state.color,
+    fillType: state.fillType,
+    fillColor: state.fillColor,
+    fillGradient: JSON.parse(JSON.stringify(state.fillGradient)),
+  };
+}
+
+// Добавляет line-сегмент к path
+function addLineSegment(pathObj, point) {
+  pathObj.segments.push({ type: "line", x: point.x, y: point.y });
+}
+
+// Добавляет curve-сегмент к path
+function addCurveSegment(pathObj, start, c1, c2, end) {
+  pathObj.segments.push({
+    type: "curve",
+    c1: { x: c1.x, y: c1.y },
+    c2: { x: c2.x, y: c2.y },
+    x: end.x,
+    y: end.y,
+  });
+}
+
+// Получает массив всех точек сочленения из сегментов path
+function getPathJoints(pathObj) {
+  const joints = [];
+  if (pathObj.segments.length === 0) return joints;
+
+  // Первая точка — из первого сегмента
+  const firstSeg = pathObj.segments[0];
+  if (firstSeg.type === "line") {
+    // Для line нужна предыдущая точка, которой нет — пропускаем
+  } else if (firstSeg.type === "curve") {
+    // Для curve первая точка — это начало кривой, но она не хранится в сегменте
+  }
+
+  // Собираем конечные точки всех сегментов
+  for (let i = 0; i < pathObj.segments.length; i++) {
+    const seg = pathObj.segments[i];
+    joints.push({ x: seg.x, y: seg.y });
+  }
+
+  return joints;
+}
+
+// Получает все точки path (для bounds, center и т.д.)
+function getAllPathPoints(pathObj) {
+  const points = [];
+  for (const seg of pathObj.segments) {
+    points.push({ x: seg.x, y: seg.y });
+    if (seg.type === "curve") {
+      points.push({ x: seg.c1.x, y: seg.c1.y });
+      points.push({ x: seg.c2.x, y: seg.c2.y });
+    }
+  }
+  return points;
 }

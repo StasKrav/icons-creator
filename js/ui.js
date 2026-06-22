@@ -143,6 +143,7 @@ const toolHotkeys = {
   c: "circle", C: "circle",
   l: "line", L: "line",
   b: "curve", B: "curve",
+  p: "path", P: "path",
   e: "erase", E: "erase",
 };
 
@@ -151,6 +152,10 @@ function onKeyDown(e) {
   const tool = toolHotkeys[e.key];
   if (tool && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
+    // При переключении с path — отменяем построение
+    if (state.tool === "path" && tool !== "path") {
+      cancelPathBuilding();
+    }
     state.tool = tool;
     state.selectedPathIdx = -1;
     state.showHandles = tool === "curve";
@@ -158,6 +163,27 @@ function onKeyDown(e) {
       btn.classList.toggle("active", btn.dataset.tool === tool);
     });
     draw();
+    return;
+  }
+
+  // Backspace — удалить последний сегмент при построении path
+  if (e.key === "Backspace" && state.tool === "path" && state.isPathBuilding) {
+    e.preventDefault();
+    if (state.pathSegments.length > 0) {
+      state.pathSegments.pop();
+      draw();
+    } else {
+      // Если сегментов нет — отменяем построение
+      cancelPathBuilding();
+      draw();
+    }
+    return;
+  }
+
+  // Enter — завершить контур без замыкания
+  if (e.key === "Enter" && state.tool === "path" && state.isPathBuilding) {
+    e.preventDefault();
+    finishPathBuilding(false);
     return;
   }
 
@@ -222,9 +248,23 @@ document.querySelectorAll("[data-tool]").forEach((btn) => {
   btn.onclick = () => {
     document.querySelectorAll("[data-tool]").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
+    // При переключении с path — отменяем построение
+    if (state.tool === "path" && btn.dataset.tool !== "path") {
+      cancelPathBuilding();
+    }
     state.tool = btn.dataset.tool;
     state.selectedPathIdx = -1;
-    state.showHandles = state.tool === "curve";
+    state.showHandles = state.tool === "curve" || state.tool === "path";
+    // Сброс состояния path при переключении
+    if (state.tool !== "path") {
+      cancelPathBuilding();
+    } else {
+      state.isPathBuilding = false;
+      state.pathSegments = [];
+      state.pathStartPoint = null;
+      state.pathCurveStart = null;
+      state.pathCurveEnd = null;
+    }
     draw();
   };
 });

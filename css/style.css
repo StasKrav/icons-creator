@@ -649,3 +649,41 @@ hr {
     transform: translateY(0);
   }
 }
+
+/* ========== ПОДРЕЖИМЫ PATH ========== */
+.path-subtools {
+  display: flex;
+  gap: 6px;
+}
+
+.path-subtools .tool-btn.small {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.15s;
+}
+
+.path-subtools .tool-btn.small:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #1e293b;
+}
+
+.path-subtools .tool-btn.small.active {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #3b82f6;
+}
+
+.path-subtools .tool-btn.small svg {
+  width: 16px;
+  height: 16px;
+}

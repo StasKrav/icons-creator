@@ -80,11 +80,72 @@ function getMousePos(e) {
   return snapXY(rawX, rawY);
 }
 
+// ========== PATH (СОСТАВНОЙ КОНТУР) ==========
+
+// Отмена построения path
+function cancelPathBuilding() {
+  state.isPathBuilding = false;
+  state.pathSegments = [];
+  state.pathStartPoint = null;
+  state.pathCurveStart = null;
+  state.pathCurveEnd = null;
+  state.currentPath = [];
+  state.isDrawing = false;
+}
+
+// Проверка, кликнул ли пользователь в первую точку path (для замыкания)
+function isClickOnPathStart(x, y) {
+  if (!state.pathStartPoint) return false;
+  return Math.hypot(x - state.pathStartPoint.x, y - state.pathStartPoint.y) < 20;
+}
+
+// Завершение построения path и сохранение как готового объекта
+function finishPathBuilding(closed) {
+  if (state.pathSegments.length === 0) return;
+
+  const pathObj = {
+    tool: "path",
+    segments: JSON.parse(JSON.stringify(state.pathSegments)),
+    closed: closed,
+    startPoint: { x: state.pathStartPoint.x, y: state.pathStartPoint.y },
+    thickness: state.thickness,
+    color: state.color,
+    fillType: closed ? state.fillType : "none",
+    fillColor: state.fillColor,
+    fillGradient: JSON.parse(JSON.stringify(state.fillGradient)),
+  };
+
+  state.paths.push(pathObj);
+  state.selectedPathIdx = state.paths.length - 1;
+  state.showHandles = true;
+  updatePanelFromSelected();
+  saveState();
+  cancelPathBuilding();
+
+  // Переключаемся на инструмент выбора, чтобы можно было сразу редактировать
+  state.tool = "select";
+  document.querySelectorAll("[data-tool]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tool === "select");
+  });
+
+  draw();
+}
+
 // ========== HIT-TESTING ==========
 function findPoint(x, y) {
   const threshold = 15;
   for (let i = 0; i < state.paths.length; i++) {
     const path = state.paths[i];
+    // Для path-объектов ищем точки сочленения сегментов
+    if (path.tool === "path") {
+      for (let j = 0; j < path.segments.length; j++) {
+        const seg = path.segments[j];
+        if (Math.hypot(seg.x - x, seg.y - y) < threshold) {
+          return { pathIdx: i, pointIdx: j, isPath: true };
+        }
+      }
+      continue;
+    }
     for (let j = 0; j < path.points.length; j++) {
       if (Math.hypot(path.points[j].x - x, path.points[j].y - y) < threshold) {
         return { pathIdx: i, pointIdx: j };
@@ -98,6 +159,23 @@ function findHandle(x, y) {
   const threshold = 20;
   for (let i = 0; i < state.paths.length; i++) {
     const path = state.paths[i];
+
+    // Для path-объектов ищем ручки curve-сегментов
+    if (path.tool === "path") {
+      for (let j = 0; j < path.segments.length; j++) {
+        const seg = path.segments[j];
+        if (seg.type === "curve") {
+          if (Math.hypot(seg.c1.x - x, seg.c1.y - y) < threshold) {
+            return { pathIdx: i, segIdx: j, handleType: "c1", isPathHandle: true };
+          }
+          if (Math.hypot(seg.c2.x - x, seg.c2.y - y) < threshold) {
+            return { pathIdx: i, segIdx: j, handleType: "c2", isPathHandle: true };
+          }
+        }
+      }
+      continue;
+    }
+
     if (path.tool === "curve" && path.points.length === 4) {
       if (Math.hypot(path.points[1].x - x, path.points[1].y - y) < threshold) return { pathIdx: i, handleIdx: 1 };
       if (Math.hypot(path.points[2].x - x, path.points[2].y - y) < threshold) return { pathIdx: i, handleIdx: 2 };
@@ -114,6 +192,11 @@ function findHandle(x, y) {
 function isPointOnPath(x, y, path) {
   const thickness = path.thickness !== undefined ? path.thickness : state.thickness;
   const hitMargin = Math.max(8, thickness + 5);
+
+  // Для path-объектов проверяем каждый сегмент
+  if (path.tool === "path") {
+    return isPointOnPathSegments(x, y, path.segments, hitMargin);
+  }
 
   if (path.tool === "rectangle" && path.points.length === 4) {
     const xs = path.points.map((p) => p.x);
@@ -145,10 +228,42 @@ function isPointOnPath(x, y, path) {
   return false;
 }
 
+function isPointOnPathSegments(x, y, segments, hitMargin) {
+  let prevPoint = null;
+  for (const seg of segments) {
+    if (seg.type === "line") {
+      if (prevPoint) {
+        const dist = distanceToLine(x, y, prevPoint, { x: seg.x, y: seg.y });
+        if (dist <= hitMargin) {
+          const dot1 = (x - prevPoint.x) * (seg.x - prevPoint.x) + (y - prevPoint.y) * (seg.y - prevPoint.y);
+          const dot2 = (x - seg.x) * (prevPoint.x - seg.x) + (y - seg.y) * (prevPoint.y - seg.y);
+          if (dot1 >= -hitMargin && dot2 >= -hitMargin) return true;
+        }
+      }
+      prevPoint = { x: seg.x, y: seg.y };
+    } else if (seg.type === "curve") {
+      if (prevPoint) {
+        for (let t = 0; t <= 1; t += 0.05) {
+          const t1 = 1 - t;
+          const px = t1 * t1 * t1 * prevPoint.x + 3 * t1 * t1 * t * seg.c1.x + 3 * t1 * t * t * seg.c2.x + t * t * t * seg.x;
+          const py = t1 * t1 * t1 * prevPoint.y + 3 * t1 * t1 * t * seg.c1.y + 3 * t1 * t * t * seg.c2.y + t * t * t * seg.y;
+          if (Math.hypot(px - x, py - y) <= hitMargin) return true;
+        }
+      }
+      prevPoint = { x: seg.x, y: seg.y };
+    }
+  }
+  return false;
+}
+
 function isPointNearPath(x, y, path) {
   const pathThickness = path.thickness || state.thickness;
   const threshold = Math.max(10, pathThickness + 5);
   const sizeThreshold = threshold;
+
+  if (path.tool === "path") {
+    return isPointOnPathSegments(x, y, path.segments, threshold);
+  }
 
   if (path.tool === "curve" && path.points.length === 4) {
     for (let t = 0; t <= 1; t += 0.01) {
@@ -221,6 +336,53 @@ function onMouseDown(e) {
     return;
   }
 
+  // ========== ИНСТРУМЕНТ PATH ==========
+  if (state.tool === "path") {
+    // Если клик в первую точку — замыкаем контур
+    if (state.isPathBuilding && isClickOnPathStart(pos.x, pos.y)) {
+      const shouldClose = confirm("🔵 Замкнуть контур?");
+      finishPathBuilding(shouldClose);
+      return;
+    }
+
+    // Если мы в процессе рисования curve-сегмента (Shift+click был, ждём отпускания)
+    if (state.isPathBuilding && state.pathCurveStart) {
+      // Игнорируем дополнительные клики во время рисования кривой
+      return;
+    }
+
+    // Начинаем новый контур или добавляем сегмент
+    if (!state.isPathBuilding) {
+      // Начинаем новый контур — первый клик устанавливает startPoint
+      state.isPathBuilding = true;
+      state.pathSegments = [];
+      state.pathStartPoint = { x: pos.x, y: pos.y };
+      state.pathCurveStart = null;
+      state.pathCurveEnd = null;
+      state.selectedPathIdx = -1;
+      state.showHandles = false;
+      draw();
+      return;
+    }
+
+    // Если зажат Shift — начинаем curve-сегмент (будет завершён на mouseup)
+    if (e.shiftKey) {
+      const lastPoint = state.pathSegments.length > 0
+        ? { x: state.pathSegments[state.pathSegments.length - 1].x, y: state.pathSegments[state.pathSegments.length - 1].y }
+        : { x: state.pathStartPoint.x, y: state.pathStartPoint.y };
+      state.pathCurveStart = lastPoint;
+      state.pathCurveEnd = { x: pos.x, y: pos.y };
+      state.isDrawing = true;
+      draw();
+      return;
+    }
+
+    // Без Shift — добавляем прямую линию
+    state.pathSegments.push({ type: "line", x: pos.x, y: pos.y });
+    draw();
+    return;
+  }
+
   if (state.tool === "select") {
     const point = findPoint(pos.x, pos.y);
     if (point) {
@@ -252,7 +414,7 @@ function onMouseDown(e) {
       const center = getPathCenter(state.paths[pathIdx]);
       state.dragData = { pathIdx, offsetX: pos.x - center.x, offsetY: pos.y - center.y };
       state.isDragging = true;
-      state.showHandles = state.paths[pathIdx]?.tool === "curve";
+      state.showHandles = state.paths[pathIdx]?.tool === "curve" || state.paths[pathIdx]?.tool === "path";
       updatePanelFromSelected();
       draw();
       return;
@@ -297,7 +459,23 @@ function onMouseMove(e) {
 
   if (state.isDragging && state.dragType === "handle") {
     const path = state.paths[state.dragData.pathIdx];
-    const handleIdx = state.dragData.handleIdx;
+    const dragData = state.dragData;
+
+    // Для path-объектов
+    if (dragData.isPathHandle) {
+      const seg = path.segments[dragData.segIdx];
+      if (seg && seg.type === "curve") {
+        if (dragData.handleType === "c1") {
+          seg.c1 = { x: pos.x, y: pos.y };
+        } else if (dragData.handleType === "c2") {
+          seg.c2 = { x: pos.x, y: pos.y };
+        }
+      }
+      draw();
+      return;
+    }
+
+    const handleIdx = dragData.handleIdx;
     if (path.tool === "curve" && path.points.length === 4) {
       path.points[handleIdx] = { x: pos.x, y: pos.y };
     } else if (path.points.length === 3) {
@@ -308,11 +486,24 @@ function onMouseMove(e) {
   }
 
   if (state.isDragging && state.dragType === "point") {
-    const { pathIdx, pointIdx } = state.dragData;
+    const { pathIdx, pointIdx, isPath } = state.dragData;
     const path = state.paths[pathIdx];
-    path.points[pointIdx] = { x: pos.x, y: pos.y };
-    if (path.tool === "rectangle" && path.points.length === 4) {
-      updateRectanglePoints(path, pointIdx, pos);
+
+    // Для path-объектов или если у пути нет points
+    if (isPath || path.tool === "path") {
+      if (path.segments && path.segments[pointIdx]) {
+        path.segments[pointIdx].x = pos.x;
+        path.segments[pointIdx].y = pos.y;
+      }
+      draw();
+      return;
+    }
+
+    if (path.points) {
+      path.points[pointIdx] = { x: pos.x, y: pos.y };
+      if (path.tool === "rectangle" && path.points.length === 4) {
+        updateRectanglePoints(path, pointIdx, pos);
+      }
     }
     draw();
     return;
@@ -320,14 +511,99 @@ function onMouseMove(e) {
 
   if (state.isDragging && state.dragType === "path") {
     const { pathIdx, offsetX, offsetY } = state.dragData;
-    const center = getPathCenter(state.paths[pathIdx]);
+    const path = state.paths[pathIdx];
+
+    if (path.tool === "path") {
+      // Перемещаем все точки сочленения и ручки
+      const center = getPathCenter(path);
+      const dx = pos.x - center.x - offsetX;
+      const dy = pos.y - center.y - offsetY;
+      for (const seg of path.segments) {
+        seg.x += dx;
+        seg.y += dy;
+        if (seg.type === "curve") {
+          seg.c1.x += dx;
+          seg.c1.y += dy;
+          seg.c2.x += dx;
+          seg.c2.y += dy;
+        }
+      }
+      const newCenter = getPathCenter(path);
+      state.dragData.offsetX = pos.x - newCenter.x;
+      state.dragData.offsetY = pos.y - newCenter.y;
+      draw();
+      return;
+    }
+
+    const center = getPathCenter(path);
     const dx = pos.x - center.x - offsetX;
     const dy = pos.y - center.y - offsetY;
-    state.paths[pathIdx].points = state.paths[pathIdx].points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
-    const newCenter = getPathCenter(state.paths[pathIdx]);
+    path.points = path.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    const newCenter = getPathCenter(path);
     state.dragData.offsetX = pos.x - newCenter.x;
     state.dragData.offsetY = pos.y - newCenter.y;
     draw();
+    return;
+  }
+
+  // Обновляем конечную точку curve при перетаскивании
+  if (state.tool === "path" && state.isPathBuilding && state.pathCurveStart && state.isDrawing) {
+    state.pathCurveEnd = { x: pos.x, y: pos.y };
+  }
+
+  // Предпросмотр для path
+  if (state.tool === "path" && state.isPathBuilding) {
+    draw();
+    ctx.save();
+    ctx.strokeStyle = state.color;
+    ctx.lineWidth = state.thickness;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // Рисуем уже построенные сегменты
+    drawPathSegmentsPreview(ctx, state.pathSegments, state.pathStartPoint);
+
+    // Рисуем текущий сегмент (предпросмотр)
+    if (state.pathSegments.length > 0) {
+      const lastSeg = state.pathSegments[state.pathSegments.length - 1];
+      const fromPoint = { x: lastSeg.x, y: lastSeg.y };
+
+      // Если рисуем curve (Shift зажат) — показываем кривую
+      if (state.pathCurveStart) {
+        const start = state.pathCurveStart;
+        const end = state.pathCurveEnd || pos;
+        const dx = end.x - start.x, dy = end.y - start.y;
+        const c1 = { x: start.x + dx / 3, y: start.y + dy / 3 };
+        const c2 = { x: start.x + (dx * 2) / 3, y: start.y + (dy * 2) / 3 };
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, end.x, end.y);
+        ctx.stroke();
+
+        // Показываем ручки предпросмотра
+        ctx.fillStyle = "rgba(255, 102, 0, 0.5)";
+        ctx.beginPath();
+        ctx.arc(c1.x, c1.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(c2.x, c2.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Без Shift — показываем прямую линию от последней точки к курсору
+        ctx.beginPath();
+        ctx.moveTo(fromPoint.x, fromPoint.y);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+      }
+    } else if (state.pathStartPoint) {
+      // Первая точка установлена, но сегментов ещё нет — показываем линию от startPoint
+      ctx.beginPath();
+      ctx.moveTo(state.pathStartPoint.x, state.pathStartPoint.y);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
     return;
   }
 
@@ -357,6 +633,21 @@ function onMouseMove(e) {
 }
 
 function onMouseUp(e) {
+  // Завершение curve-сегмента при отпускании мыши (Shift+drag)
+  if (state.tool === "path" && state.isPathBuilding && state.pathCurveStart && state.isDrawing) {
+    const start = state.pathCurveStart;
+    const end = state.pathCurveEnd || { x: start.x, y: start.y };
+    const dx = end.x - start.x, dy = end.y - start.y;
+    const c1 = { x: start.x + dx / 3, y: start.y + dy / 3 };
+    const c2 = { x: start.x + (dx * 2) / 3, y: start.y + (dy * 2) / 3 };
+    state.pathSegments.push({ type: "curve", c1, c2, x: end.x, y: end.y });
+    state.pathCurveStart = null;
+    state.pathCurveEnd = null;
+    state.isDrawing = false;
+    draw();
+    return;
+  }
+
   if (state.isDragging) {
     if (["handle", "point", "path"].includes(state.dragType)) saveState();
     state.isDragging = false;
@@ -420,6 +711,12 @@ function updateCursor(x, y) {
     else canvas.style.cursor = "default";
   } else if (state.tool === "curve") {
     canvas.style.cursor = findHandle(x, y) ? "move" : "crosshair";
+  } else if (state.tool === "path") {
+    if (state.isPathBuilding && isClickOnPathStart(x, y)) {
+      canvas.style.cursor = "pointer";
+    } else {
+      canvas.style.cursor = "crosshair";
+    }
   } else if (state.tool === "erase") {
     canvas.style.cursor = "pointer";
   } else {
@@ -443,4 +740,34 @@ function eraseAt(x, y) {
 function createBezierCurve(start, end) {
   const dx = end.x - start.x, dy = end.y - start.y;
   return { tool: "curve", points: [{ x: start.x, y: start.y }, { x: start.x + dx * 0.33, y: start.y + dy * 0.33 }, { x: start.x + dx * 0.66, y: start.y + dy * 0.66 }, { x: end.x, y: end.y }], thickness: state.thickness, color: state.color };
+}
+
+// Рисует уже построенные сегменты path (для предпросмотра)
+function drawPathSegmentsPreview(ctx, segments, startPoint) {
+  if (segments.length === 0) return;
+
+  ctx.save();
+  ctx.strokeStyle = state.color;
+  ctx.lineWidth = state.thickness;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  let prevPoint = startPoint;
+  for (const seg of segments) {
+    if (seg.type === "line") {
+      ctx.beginPath();
+      ctx.moveTo(prevPoint.x, prevPoint.y);
+      ctx.lineTo(seg.x, seg.y);
+      ctx.stroke();
+      prevPoint = { x: seg.x, y: seg.y };
+    } else if (seg.type === "curve") {
+      ctx.beginPath();
+      ctx.moveTo(prevPoint.x, prevPoint.y);
+      ctx.bezierCurveTo(seg.c1.x, seg.c1.y, seg.c2.x, seg.c2.y, seg.x, seg.y);
+      ctx.stroke();
+      prevPoint = { x: seg.x, y: seg.y };
+    }
+  }
+
+  ctx.restore();
 }
