@@ -136,8 +136,11 @@ function findPoint(x, y) {
   const threshold = 15;
   for (let i = 0; i < state.paths.length; i++) {
     const path = state.paths[i];
-    // Для path-объектов ищем точки сочленения сегментов
     if (path.tool === "path") {
+      // Проверяем startPoint (ПЕРВУЮ ТОЧКУ)
+      if (path.startPoint && Math.hypot(path.startPoint.x - x, path.startPoint.y - y) < threshold) {
+        return { pathIdx: i, pointIdx: -1, isPath: true, isStartPoint: true };
+      }
       for (let j = 0; j < path.segments.length; j++) {
         const seg = path.segments[j];
         if (Math.hypot(seg.x - x, seg.y - y) < threshold) {
@@ -153,6 +156,26 @@ function findPoint(x, y) {
     }
   }
   return null;
+}
+
+function movePathStartPoint(path, newPos) {
+  if (!path.startPoint) return;
+  
+  const dx = newPos.x - path.startPoint.x;
+  const dy = newPos.y - path.startPoint.y;
+  
+  path.startPoint = { x: newPos.x, y: newPos.y };
+  
+  for (const seg of path.segments) {
+    seg.x += dx;
+    seg.y += dy;
+    if (seg.type === "curve") {
+      seg.c1.x += dx;
+      seg.c1.y += dy;
+      seg.c2.x += dx;
+      seg.c2.y += dy;
+    }
+  }
 }
 
 function findHandle(x, y) {
@@ -387,7 +410,14 @@ function onMouseDown(e) {
     const point = findPoint(pos.x, pos.y);
     if (point) {
       state.dragType = "point";
-      state.dragData = { pathIdx: point.pathIdx, pointIdx: point.pointIdx, startX: pos.x, startY: pos.y };
+      state.dragData = { 
+        pathIdx: point.pathIdx, 
+        pointIdx: point.pointIdx,
+        isPath: point.isPath || false,
+        isStartPoint: point.isStartPoint || false,
+        startX: pos.x, 
+        startY: pos.y 
+      };
       state.isDragging = true;
       state.selectedPathIdx = point.pathIdx;
       state.showHandles = true;
@@ -486,19 +516,20 @@ function onMouseMove(e) {
   }
 
   if (state.isDragging && state.dragType === "point") {
-    const { pathIdx, pointIdx, isPath } = state.dragData;
+    const { pathIdx, pointIdx, isPath, isStartPoint } = state.dragData;
     const path = state.paths[pathIdx];
-
-    // Для path-объектов или если у пути нет points
+  
     if (isPath || path.tool === "path") {
-      if (path.segments && path.segments[pointIdx]) {
+      if (isStartPoint) {
+        movePathStartPoint(path, { x: pos.x, y: pos.y });
+      } else if (path.segments && path.segments[pointIdx]) {
         path.segments[pointIdx].x = pos.x;
         path.segments[pointIdx].y = pos.y;
       }
       draw();
       return;
     }
-
+  
     if (path.points) {
       path.points[pointIdx] = { x: pos.x, y: pos.y };
       if (path.tool === "rectangle" && path.points.length === 4) {

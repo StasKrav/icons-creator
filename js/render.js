@@ -47,6 +47,9 @@ function buildPathSegments(ctx, segments, closed, r, startPoint) {
   const start = startPoint || (segments.length > 0 ? { x: segments[0].x, y: segments[0].y } : null);
   if (!start) return;
 
+  // ВАЖНО: Начинаем путь с startPoint
+  ctx.moveTo(r(start.x), r(start.y));
+
   let prevPoint = start;
 
   for (const seg of segments) {
@@ -54,13 +57,17 @@ function buildPathSegments(ctx, segments, closed, r, startPoint) {
       ctx.lineTo(r(seg.x), r(seg.y));
       prevPoint = { x: seg.x, y: seg.y };
     } else if (seg.type === "curve") {
-      ctx.bezierCurveTo(r(seg.c1.x), r(seg.c1.y), r(seg.c2.x), r(seg.c2.y), r(seg.x), r(seg.y));
+      ctx.bezierCurveTo(
+        r(seg.c1.x), r(seg.c1.y),
+        r(seg.c2.x), r(seg.c2.y),
+        r(seg.x), r(seg.y)
+      );
       prevPoint = { x: seg.x, y: seg.y };
     }
   }
 
   if (closed) {
-    ctx.closePath();
+    ctx.closePath(); // Теперь правильно замыкает на startPoint
   }
 }
 
